@@ -1,0 +1,6 @@
+[package]
+name = "lamp-drpc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
