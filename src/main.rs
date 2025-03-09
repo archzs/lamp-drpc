@@ -8,6 +8,7 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 struct Config {
     player_name: String,
+    va_individual_art: bool,
 }
 
 fn main() {
@@ -72,17 +73,27 @@ fn load_config() -> Config {
                                 .write(true)
                                 .create(true)
                                 .open(config_file_path);
-
-            // Write cmus as default player.
-            if config_file.is_ok() {
-                let _ = config_file.expect("Configuration file should exist and be accessible at this point.").write_all(b"player_name = \'cmus\'");
-            } else {
-                eprintln!("Error: {}", config_file.unwrap_err());
+            
+            /* 
+                Set default configuration values.
+                - player_name is the name of the process to be tracked while running. Default is 'cmus'.
+                - va_individual_art indidcates whether or not tracks with "Various Artists" as the album artist
+                  should have their album art processed individually. Default is true.
+            */ 
+            match config_file {
+                Ok(_) =>  {
+                    let _ = write!(config_file.expect("Configuration file should exist and be accessible at this point."), "player_name = \'cmus\'\n\
+                                                                                                                            va_individual_art = true");
+                },
+                Err(e) => {
+                    eprintln!("Error: {}", e);
                     process::exit(1);
+                },
             }
 
             let config_values = Config {
                 player_name: String::from("cmus"),
+                va_individual_art: true,
             };
             return config_values;
         },
