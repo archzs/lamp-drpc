@@ -14,6 +14,7 @@ struct Config {
 fn main() {
     let config_values: Config = load_config();
     println!("Player name: {}", config_values.player_name);
+    // Add error logging on errors
     todo!();
 }
 
@@ -32,7 +33,7 @@ fn load_config() -> Config {
     match fs::exists(&config_dir_path) {
         Ok(true) if Path::new(&config_dir_path.as_str()).is_dir() => {},
         Ok(true) => { 
-            // Configuration directory exists, but is not a directory.
+            // File exists at configuration directory path, but is not a directory.
             eprintln!("Error: file at {} is not a directory.", config_dir_path);
             process::exit(1);
         },
@@ -61,7 +62,7 @@ fn load_config() -> Config {
             match toml::from_str(toml_string.as_str()) {
                 Ok(config_values) => return config_values,
                 Err(e) => {
-                    eprintln!("Error: {}", e); 
+                    log_error(&e.message());
                     process::exit(1);
                 }
             }
@@ -83,10 +84,10 @@ fn load_config() -> Config {
             match config_file {
                 Ok(_) =>  {
                     let _ = write!(config_file.expect("Configuration file should exist and be accessible at this point."), "player_name = \'cmus\'\n\
-                                                                                                                            va_individual_art = true");
+                                                                                                                            va_individual_art = true\n");
                 },
                 Err(e) => {
-                    eprintln!("Error: {}", e);
+                    log_error(&e.to_string().as_str());
                     process::exit(1);
                 },
             }
@@ -98,8 +99,38 @@ fn load_config() -> Config {
             return config_values;
         },
         Err(e) => { 
-            eprintln!("Error: {}", e); 
+            log_error(&e.to_string().as_str());
             process::exit(1); 
         },
     }
+}
+
+fn log_error(e: &str) {
+    eprintln!("Error: {}", &e);
+    match env::home_dir() {
+        Some(path) => {
+            let config_dir_path = path.to_str().unwrap().to_owned() + "/.config/lamp-drpc";
+            let err_log_file_path = config_dir_path + "/lamp-error.log";
+            let err_log_file = fs::OpenOptions::new()
+                                .read(false)
+                                .write(true)
+                                .create(true)
+                                .append(true)
+                                .open(err_log_file_path);
+            match err_log_file {
+                Ok(_) =>  {
+                    let _ = write!(err_log_file.expect("Error log file should exist and be accessible at this point."), "[{}] Error: {}\n", chrono::offset::Local::now(), &e);
+                },
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    process::exit(1);
+                },
+            }
+        },
+        None => {
+            eprintln!("Error: Could not find home directory.");
+            process::exit(1);
+        },
+    }
+    
 }
