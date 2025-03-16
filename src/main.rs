@@ -29,15 +29,19 @@ fn main() {
     let mut player_status = ProcessStatus::Stop;
 
     // Get PID of player process for checking process status
-    let mut player_pid = get_pid_by_proc_name(&sys, &config_values.player_name);
+    let player_pid = get_pid_by_proc_name(&sys, &config_values.player_name);
 
     // Get status of player process by PID
     player_status = get_status_by_pid(&sys, &player_pid);
 
+    // Declare variables for use in main loop
+    let mut active_file_path = String::new();   // The path of the currently playing track.
+    let mut previous_file_path = String::new(); // The path of the previous track, used to determine when the active track has changed.
+
     // Begin main loop
     while player_status != ProcessStatus::Stop {
 
-        // Refresh system processes
+        // Refresh system to get updates to player process
         sys.refresh_processes_specifics(
             ProcessesToUpdate::Some(&[player_pid]),
             true,
