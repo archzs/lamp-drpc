@@ -23,27 +23,18 @@ impl StandardPlayer for MusicPlayer {
     fn verify_running(&self) -> bool {
         match self {
             MusicPlayer::Cmus(cmus) => return Cmus::verify_running(&cmus),
-            _ => {
-                todo!();
-            }
         }
     }
 
     fn get_active_file_path(&mut self) -> String {
         match self {
             MusicPlayer::Cmus(cmus) => return Cmus::get_active_file_path(cmus),
-            _ => {
-                todo!();
-            }
         }
     }
 
     fn get_position_and_duration(&self) -> (Option<u32>, Option<u32>) {
         match self {
             MusicPlayer::Cmus(cmus) => return Cmus::get_position_and_duration(&cmus),
-            _ => {
-                todo!();
-            }
         }
     }
 }
