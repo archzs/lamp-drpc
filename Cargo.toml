@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 chrono = "0.4.40"
+id3 = "1.16.2"
 serde = { version = "1.0.218", features = ["derive"] }
 sysinfo = "0.33.1"
 toml = "0.8.20"

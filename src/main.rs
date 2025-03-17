@@ -1,6 +1,7 @@
 use std::env;
 use std::thread;
 use std::time::Duration;
+use id3::{Content, Tag, TagLike};
 use serde::Deserialize;
 use sysinfo::{Pid, ProcessStatus, ProcessesToUpdate, ProcessRefreshKind, RefreshKind, System};
 
@@ -44,7 +45,32 @@ struct Config {
     player_name: String,
     player_check_delay: u64,
     run_secondary_checks: bool,
-    va_individual_art: bool,
+    va_individual_album: bool,
+}
+
+struct Image {
+    mime_type: String,
+    data: Vec<u8>,
+}
+
+struct MetadataPackage {
+    album_artist: Option<Vec<String>>,
+    album: Option<String>,
+    artist: Vec<String>,
+    title: String,
+    album_art: Option<Image>,
+}
+
+impl Default for MetadataPackage {
+    fn default() -> Self {
+        MetadataPackage {
+            album_artist: None,
+            album: None,
+            artist: Vec::<String>::new(),
+            title: String::new(),
+            album_art: None,
+        }
+    }
 }
 
 fn main() {
@@ -84,13 +110,20 @@ fn main() {
     // Declare variables for use in main loop
     let mut active_file_path = String::new();   // The path of the currently playing track.
     let mut previous_file_path = String::new(); // The path of the previous track, used to determine when the active track has changed.
-    let mut active_position_duration: (Option<u32>, Option<u32>) = (None, None); // The 
+    let mut active_position_duration: (Option<u32>, Option<u32>) = (None, None); // The position of current playback and duration of audio file.
 
     // Begin main loop
     while player_status != ProcessStatus::Stop {
         // Update active file path, duration, and position
         active_file_path = active_music_player.get_active_file_path();
         active_position_duration = active_music_player.get_position_and_duration();
+
+        // If active file has changed, then read metadata of new file.
+        if active_file_path != previous_file_path {
+            // Create and fill new MetadataPackage.
+            let metadata_pack = read_metadata(&active_file_path, &config_values.va_individual_album).unwrap();
+            fs::write("/home/zera/workspace/test.jpg", metadata_pack.album_art.unwrap().data).unwrap();
+        }
 
         // Refresh system to get updates to player process
         sys.refresh_processes_specifics(
@@ -172,15 +205,15 @@ fn load_config() -> Config {
                   Default is 5.
                 - run_secondary_checks determines whether or not player-specific secondary verification of status
                   should be performed. Default is true.
-                - va_individual_art indidcates whether or not tracks with "Various Artists" as the album artist
-                  should have their album art processed individually. Default is true.
+                - va_individual_album indidcates whether or not tracks with "Various Artists" as the album artist
+                  should have their album fields blank and album art processed individually. Default is true.
             */ 
             match config_file {
                 Ok(_) =>  {
                     let _ = write!(config_file.expect("Configuration file should exist and be accessible at this point."), "player_name = \'cmus\'\n\
                                                                                                                             player_check_delay = 5\n\
                                                                                                                             run_secondary_checks = true\n\
-                                                                                                                            va_individual_art = true\n");
+                                                                                                                            va_individual_album = true\n");
                 },
                 Err(e) => {
                     error_log::log_error("Config Error", &e.to_string().as_str());
@@ -192,7 +225,7 @@ fn load_config() -> Config {
                 player_name: String::from("cmus"),
                 player_check_delay: 5,
                 run_secondary_checks: true,
-                va_individual_art: true,
+                va_individual_album: true,
             };
             return config_values;
         },
@@ -202,35 +235,6 @@ fn load_config() -> Config {
         },
     }
 }
-
-/* fn log_error(e: &str) {
-    eprintln!("Error: {}", &e);
-    match env::home_dir() {
-        Some(path) => {
-            let config_dir_path = path.to_str().unwrap().to_owned() + "/.config/lamp-drpc";
-            let err_log_file_path = config_dir_path + "/lamp-error.log";
-            let err_log_file = fs::OpenOptions::new()
-                                .read(false)
-                                .write(true)
-                                .create(true)
-                                .append(true)
-                                .open(err_log_file_path);
-            match err_log_file {
-                Ok(_) =>  {
-                    let _ = write!(err_log_file.expect("Error log file should exist and be accessible at this point."), "[{}] Error: {}\n", chrono::offset::Local::now(), &e);
-                },
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    process::exit(1);
-                },
-            }
-        },
-        None => {
-            eprintln!("Error: Could not find home directory.");
-            process::exit(1);
-        },
-    } 
-} */
 
 fn get_pid_by_proc_name(sys: &System, proc_name: &String) -> sysinfo::Pid {
     if let Some(possible_process) = sys.processes_by_exact_name(proc_name.as_ref()).next() {
@@ -249,5 +253,77 @@ fn get_status_by_pid(sys: &System, player_pid: &sysinfo::Pid) -> ProcessStatus {
     else {
         error_log::log_error("Error", "The target PID could not be found. The player may no longer be running.");
         process::exit(1);
+    }
+}
+
+fn read_metadata(active_file_path: &String, va_individual_album: &bool) -> Option<MetadataPackage> {
+    // Determine which tag reader to used based on file extension.
+    //FIX MATCH
+    match active_file_path.rsplit_once('.').unwrap().1 {
+        //"flac" => return (read_vorbis(&active_file_path, metadata_pack), false),
+        "mp3" | "wav" => return read_id3(&active_file_path, &va_individual_album),
+        _ => {
+            error_log::log_error("File Error", format!("The file at {} is not in a supported format.", active_file_path).as_str());
+            return None;
+        }
+    }
+}
+
+fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<MetadataPackage> {
+    if let Ok(id3_tag) = Tag::read_from_path(&active_file_path) {
+        let mut metadata_pack = MetadataPackage::default();
+
+        // Retrieve fields from specified file.
+        // album_artist
+        let album_artist = id3_tag.album_artist().map(|album_artist| vec![album_artist.to_string()]);
+        metadata_pack.album_artist = album_artist.clone();
+        
+        // album
+        // If va_individual_album is enabled and album_artist is "Various Artists", album tag is not recorded.
+        if *va_individual_album && album_artist.unwrap()[0] == String::from("Various Artists") {
+            metadata_pack.album = None;
+        } else {
+            metadata_pack.album = id3_tag.album().map(|album| album.to_string());
+        }
+        
+        // artist (Tag is required for basic functionality, so return None if not present)
+        match id3_tag.artists() {
+            Some(artists) => metadata_pack.artist = artists.into_iter().map(|v| v.to_owned()).collect(),
+            None => {
+                error_log::log_error("Metadata Error", format!("No artist tag(s) were found in file {}.", active_file_path).as_str());
+                return None;
+            }
+        }
+
+        // title (Tag is required for basic functionality, so return None if not present)
+        match id3_tag.title() {
+            Some(title) => metadata_pack.title = title.to_owned(),
+            None => {
+                error_log::log_error("Metadata Error", format!("No title tag was found in file {}.", active_file_path).as_str());
+                return None;
+            }
+        }
+        
+        // album_art
+        /*
+            Determine whether or not to extract and upload image here. Based on va_individual_album.
+         */
+        let extracted_images = id3_tag.pictures().collect::<Vec<_>>();
+        if extracted_images.len() > 0 {
+            match Content::Picture(extracted_images[0].clone()).picture() {
+                Some(album_art) => {
+                    let new_image = Image { mime_type: album_art.mime_type.clone(), data: album_art.data.clone() };
+                    metadata_pack.album_art = Some(new_image);
+                }
+                None => metadata_pack.album_art = None,
+            }
+        } else {
+            metadata_pack.album_art = None;
+        }
+
+        return Some(metadata_pack);
+    } else {
+        error_log::log_error("Metadata Error", format!("ID3 tags could not be read from the file at {}.", active_file_path).as_str());
+        return None;
     }
 }
