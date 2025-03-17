@@ -57,9 +57,9 @@ struct Image {
 }
 
 struct MetadataPackage {
-    album_artist: Option<Vec<String>>,
+    album_artist: Option<String>,
     album: Option<String>,
-    artist: Vec<String>,
+    artist: String,
     title: String,
     album_art: Option<Image>,
 }
@@ -69,7 +69,7 @@ impl Default for MetadataPackage {
         MetadataPackage {
             album_artist: None,
             album: None,
-            artist: Vec::<String>::new(),
+            artist: String::new(),
             title: String::new(),
             album_art: None,
         }
@@ -125,7 +125,7 @@ fn main() {
         if active_file_path != previous_file_path {
             // Create and fill new MetadataPackage.
             let metadata_pack = read_metadata(&active_file_path, &config_values.va_individual_album).unwrap();
-            println!("album_artist: {:?}\nalbum: {}\nartist: {:?}\ntitle: {}", metadata_pack.album_artist.unwrap(), metadata_pack.album.unwrap(), metadata_pack.artist, metadata_pack.title);
+            println!("album_artist: {}\nalbum: {}\nartist: {}\ntitle: {}", metadata_pack.album_artist.unwrap(), metadata_pack.album.unwrap(), metadata_pack.artist, metadata_pack.title);
             fs::write("/home/zera/workspace/test.jpg", metadata_pack.album_art.unwrap().data).unwrap();
         }
 
@@ -286,7 +286,7 @@ fn read_vorbis(active_file_path: &String, va_individual_album: &bool) -> Option<
             }
 
             if album_artist_vec.len() > 0 {
-                metadata_pack.album_artist = Some(album_artist_vec.clone());
+                metadata_pack.album_artist = Some(album_artist_vec.join(", "));
             } else {
                 metadata_pack.album_artist = None;
             }
@@ -313,7 +313,7 @@ fn read_vorbis(active_file_path: &String, va_individual_album: &bool) -> Option<
                 artist_vec.push(artist.to_owned());
             }
             if artist_vec.len() > 0 {
-                metadata_pack.artist = artist_vec;
+                metadata_pack.artist = artist_vec.join(", ");
             } else {
                 return None;
             }
@@ -380,12 +380,18 @@ fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<Met
 
             // Retrieve fields from specified file.
             // album_artist
-            let album_artist = id3_tag.album_artist().map(|album_artist| vec![album_artist.to_string()]);
-            metadata_pack.album_artist = album_artist.clone();
+            let mut album_artist_compare = String::new();
+            match id3_tag.album_artist().map(|album_artist| album_artist.to_string()) {
+                Some(album_artist) =>  {
+                    album_artist_compare = album_artist;
+                    metadata_pack.album_artist = Some(album_artist_compare.clone())
+                },
+                None => metadata_pack.album_artist = None,
+            }
             
             // album
             // If va_individual_album is enabled and album_artist is "Various Artists", album tag is not recorded.
-            if *va_individual_album && album_artist.unwrap()[0] == String::from("Various Artists") {
+            if *va_individual_album && album_artist_compare == String::from("Various Artists") {
                 metadata_pack.album = None;
             } else {
                 metadata_pack.album = id3_tag.album().map(|album| album.to_string());
@@ -393,11 +399,14 @@ fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<Met
             
             // artist (Tag is required for basic functionality, so return None if not present)
             match id3_tag.artists() {
-                Some(artists) => metadata_pack.artist = artists.into_iter().map(|v| v.to_owned()).collect(),
+                //Some(artists) => metadata_pack.artist = artists.into_iter().map(|v| v.to_owned()).join(", "),
+                Some(artists) => {
+                    metadata_pack.artist = artists.join(", ");
+                },
                 None => {
                     error_log::log_error("Metadata Error", format!("No artist tag(s) were found in file {}.", active_file_path).as_str());
                     return None;
-                }
+                },
             }
 
             // title (Tag is required for basic functionality, so return None if not present)
