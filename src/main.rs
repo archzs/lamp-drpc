@@ -1,6 +1,9 @@
 use std::env;
 use std::thread;
 use std::time::Duration;
+use audiotags::components::FlacTag;
+use audiotags::{AudioTagEdit, MimeType};
+use claxon::FlacReader;
 use id3::{Content, Tag, TagLike};
 use serde::Deserialize;
 use sysinfo::{Pid, ProcessStatus, ProcessesToUpdate, ProcessRefreshKind, RefreshKind, System};
@@ -122,6 +125,7 @@ fn main() {
         if active_file_path != previous_file_path {
             // Create and fill new MetadataPackage.
             let metadata_pack = read_metadata(&active_file_path, &config_values.va_individual_album).unwrap();
+            println!("album_artist: {:?}\nalbum: {}\nartist: {:?}\ntitle: {}", metadata_pack.album_artist.unwrap(), metadata_pack.album.unwrap(), metadata_pack.artist, metadata_pack.title);
             fs::write("/home/zera/workspace/test.jpg", metadata_pack.album_art.unwrap().data).unwrap();
         }
 
@@ -260,7 +264,7 @@ fn read_metadata(active_file_path: &String, va_individual_album: &bool) -> Optio
     // Determine which tag reader to used based on file extension.
     //FIX MATCH
     match active_file_path.rsplit_once('.').unwrap().1 {
-        //"flac" => return (read_vorbis(&active_file_path, metadata_pack), false),
+        "flac" => return read_vorbis(&active_file_path, &va_individual_album),
         "mp3" | "wav" => return read_id3(&active_file_path, &va_individual_album),
         _ => {
             error_log::log_error("File Error", format!("The file at {} is not in a supported format.", active_file_path).as_str());
@@ -269,61 +273,164 @@ fn read_metadata(active_file_path: &String, va_individual_album: &bool) -> Optio
     }
 }
 
-fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<MetadataPackage> {
-    if let Ok(id3_tag) = Tag::read_from_path(&active_file_path) {
-        let mut metadata_pack = MetadataPackage::default();
+fn read_vorbis(active_file_path: &String, va_individual_album: &bool) -> Option<MetadataPackage> {
+    match FlacReader::open(&active_file_path) {
+        Ok(vorbis_tag) => {
+            let mut metadata_pack = MetadataPackage::default();
 
-        // Retrieve fields from specified file.
-        // album_artist
-        let album_artist = id3_tag.album_artist().map(|album_artist| vec![album_artist.to_string()]);
-        metadata_pack.album_artist = album_artist.clone();
-        
-        // album
-        // If va_individual_album is enabled and album_artist is "Various Artists", album tag is not recorded.
-        if *va_individual_album && album_artist.unwrap()[0] == String::from("Various Artists") {
-            metadata_pack.album = None;
-        } else {
-            metadata_pack.album = id3_tag.album().map(|album| album.to_string());
-        }
-        
-        // artist (Tag is required for basic functionality, so return None if not present)
-        match id3_tag.artists() {
-            Some(artists) => metadata_pack.artist = artists.into_iter().map(|v| v.to_owned()).collect(),
-            None => {
-                error_log::log_error("Metadata Error", format!("No artist tag(s) were found in file {}.", active_file_path).as_str());
-                return None;
+            // Retrieve fields from specified file.
+            // album_artist
+            let mut album_artist_vec = Vec::<String>::new();
+            for album_artist in vorbis_tag.get_tag("albumartist") {
+                album_artist_vec.push(album_artist.to_owned());
             }
-        }
 
-        // title (Tag is required for basic functionality, so return None if not present)
-        match id3_tag.title() {
-            Some(title) => metadata_pack.title = title.to_owned(),
-            None => {
-                error_log::log_error("Metadata Error", format!("No title tag was found in file {}.", active_file_path).as_str());
-                return None;
+            if album_artist_vec.len() > 0 {
+                metadata_pack.album_artist = Some(album_artist_vec.clone());
+            } else {
+                metadata_pack.album_artist = None;
             }
-        }
-        
-        // album_art
-        /*
-            Determine whether or not to extract and upload image here. Based on va_individual_album.
-         */
-        let extracted_images = id3_tag.pictures().collect::<Vec<_>>();
-        if extracted_images.len() > 0 {
-            match Content::Picture(extracted_images[0].clone()).picture() {
-                Some(album_art) => {
-                    let new_image = Image { mime_type: album_art.mime_type.clone(), data: album_art.data.clone() };
-                    metadata_pack.album_art = Some(new_image);
+
+            // album
+            // If va_individual_album is enabled and album_artist is "Various Artists", album tag is not recorded.
+            if *va_individual_album && album_artist_vec[0] == String::from("Various Artists") {
+                metadata_pack.album = None;
+            } else {
+                let mut album_vec = Vec::<&str>::new();
+                for album in vorbis_tag.get_tag("album") {
+                    album_vec.push(album);
                 }
-                None => metadata_pack.album_art = None,
+                if album_vec.len() > 0 {
+                    metadata_pack.album = Some(album_vec[0].to_owned());
+                } else {
+                    metadata_pack.album = None;
+                }
             }
-        } else {
-            metadata_pack.album_art = None;
-        }
 
-        return Some(metadata_pack);
-    } else {
-        error_log::log_error("Metadata Error", format!("ID3 tags could not be read from the file at {}.", active_file_path).as_str());
-        return None;
+            // artist (Tag is required for basic functionality, so return None if not present)
+            let mut artist_vec = Vec::<String>::new();
+            for artist in vorbis_tag.get_tag("artist") {
+                artist_vec.push(artist.to_owned());
+            }
+            if artist_vec.len() > 0 {
+                metadata_pack.artist = artist_vec;
+            } else {
+                return None;
+            }
+
+            // title (Tag is required for basic functionality, so return None if not present)
+            let mut title_vec = Vec::<&str>::new();
+            for title in vorbis_tag.get_tag("title") {
+                title_vec.push(title);
+            }
+            if title_vec.len() > 0 {
+                metadata_pack.title = title_vec[0].to_owned();
+            } else {
+                return None;
+            }
+
+            // album_art
+            /*
+                Determine whether or not to extract and upload image here. Based on va_individual_album.
+            */
+            match FlacTag::read_from_path(&active_file_path) {
+                Ok(flac_tag) => {
+                    match flac_tag.album_cover() {
+                        Some(album_art) => {
+                            let new_image: Image;
+                            match album_art.mime_type {
+                                MimeType::Png =>  {
+                                    new_image = Image { mime_type: "png".to_owned(), data: album_art.data.to_vec() };
+                                    metadata_pack.album_art = Some(new_image);
+                                },
+                                MimeType::Jpeg => {
+                                    new_image = Image { mime_type: "jpg".to_owned(), data: album_art.data.to_vec() };
+                                    metadata_pack.album_art = Some(new_image);
+                                },
+                                _a => { // For any other types
+                                    error_log::log_error("Metadata Error", format!("Album cover in file {} is of unsupported mime type {:?}.", &active_file_path, _a).as_str());
+                                    metadata_pack.album_art = None;
+                                }
+                            }
+                        }
+                        None => {
+                            metadata_pack.album_art = None;
+                        }
+                    }
+                }
+                Err(vorbis_error) => {
+                    error_log::log_error("Metadata Error", format!("Album art could not be extracted from the file at {}:\n{:?}", active_file_path, vorbis_error).as_str());
+                    metadata_pack.album_art = None;
+                }
+            }
+
+            Some(metadata_pack)
+        }
+        Err(vorbis_error) => {
+            error_log::log_error("Metadata Error", format!("Vorbis comments could not be read from the file at {}:\n{:?}", active_file_path, vorbis_error).as_str());
+            return None;
+        }
+    }
+}
+
+fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<MetadataPackage> {
+    match Tag::read_from_path(&active_file_path) {
+        Ok(id3_tag) => {
+            let mut metadata_pack = MetadataPackage::default();
+
+            // Retrieve fields from specified file.
+            // album_artist
+            let album_artist = id3_tag.album_artist().map(|album_artist| vec![album_artist.to_string()]);
+            metadata_pack.album_artist = album_artist.clone();
+            
+            // album
+            // If va_individual_album is enabled and album_artist is "Various Artists", album tag is not recorded.
+            if *va_individual_album && album_artist.unwrap()[0] == String::from("Various Artists") {
+                metadata_pack.album = None;
+            } else {
+                metadata_pack.album = id3_tag.album().map(|album| album.to_string());
+            }
+            
+            // artist (Tag is required for basic functionality, so return None if not present)
+            match id3_tag.artists() {
+                Some(artists) => metadata_pack.artist = artists.into_iter().map(|v| v.to_owned()).collect(),
+                None => {
+                    error_log::log_error("Metadata Error", format!("No artist tag(s) were found in file {}.", active_file_path).as_str());
+                    return None;
+                }
+            }
+
+            // title (Tag is required for basic functionality, so return None if not present)
+            match id3_tag.title() {
+                Some(title) => metadata_pack.title = title.to_owned(),
+                None => {
+                    error_log::log_error("Metadata Error", format!("No title tag was found in file {}.", active_file_path).as_str());
+                    return None;
+                }
+            }
+            
+            // album_art
+            /*
+                Determine whether or not to extract and upload image here. Based on va_individual_album.
+            */
+            let extracted_images = id3_tag.pictures().collect::<Vec<_>>();
+            if extracted_images.len() > 0 {
+                match Content::Picture(extracted_images[0].clone()).picture() {
+                    Some(album_art) => {
+                        let new_image = Image { mime_type: album_art.mime_type.clone(), data: album_art.data.clone() };
+                        metadata_pack.album_art = Some(new_image);
+                    }
+                    None => metadata_pack.album_art = None,
+                }
+            } else {
+                metadata_pack.album_art = None;
+            }
+
+            return Some(metadata_pack);
+        }
+        Err(id3_error) => {
+            error_log::log_error("Metadata Error", format!("ID3 tags could not be read from the file at {}:\n{}", active_file_path, id3_error).as_str());
+            return None;
+        }    
     }
 }
