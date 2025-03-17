@@ -8,7 +8,7 @@ use crate::error_log::process;
 pub trait StandardPlayer {
     fn verify_running(&self) -> bool;
     fn get_active_file_path(&mut self) -> String;
-    fn get_duration_and_position(&self) -> (Option<u32>, Option<u32>);
+    fn get_position_and_duration(&self) -> (Option<u32>, Option<u32>);
 }
 
 pub struct Cmus {
@@ -118,7 +118,7 @@ impl StandardPlayer for Cmus {
         active_file_path
     }
 
-    fn get_duration_and_position(&self) -> (Option<u32>, Option<u32>) {
+    fn get_position_and_duration(&self) -> (Option<u32>, Option<u32>) {
         self.active_position_duration
     }
 }

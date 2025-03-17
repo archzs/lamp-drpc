@@ -38,9 +38,9 @@ impl StandardPlayer for MusicPlayer {
         }
     }
 
-    fn get_duration_and_position(&self) -> (Option<u32>, Option<u32>) {
+    fn get_position_and_duration(&self) -> (Option<u32>, Option<u32>) {
         match self {
-            MusicPlayer::Cmus(cmus) => return Cmus::get_duration_and_position(&cmus),
+            MusicPlayer::Cmus(cmus) => return Cmus::get_position_and_duration(&cmus),
             _ => {
                 todo!();
             }
@@ -93,13 +93,13 @@ fn main() {
     // Declare variables for use in main loop
     let mut active_file_path = String::new();   // The path of the currently playing track.
     let mut previous_file_path = String::new(); // The path of the previous track, used to determine when the active track has changed.
-    let mut active_duration_position: (Option<u32>, Option<u32>) = (None, None);
+    let mut active_position_duration: (Option<u32>, Option<u32>) = (None, None); // The 
 
     // Begin main loop
     while player_status != ProcessStatus::Stop {
         // Update active file path, duration, and position
         active_file_path = active_music_player.get_active_file_path();
-        active_duration_position = active_music_player.get_duration_and_position();
+        active_position_duration = active_music_player.get_position_and_duration();
 
         // Refresh system to get updates to player process
         sys.refresh_processes_specifics(
@@ -113,6 +113,7 @@ fn main() {
             process::exit(0);
         };
         player_status = player_process.status();
+        previous_file_path = active_file_path;
     }
 }
 
