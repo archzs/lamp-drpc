@@ -57,7 +57,7 @@ struct Config {
     player_name: String,
     player_check_delay: u64,
     run_secondary_checks: bool,
-    va_individual_album: bool,
+    va_album_individual: bool,
 }
 
 struct AlbumArt {
@@ -136,7 +136,7 @@ fn main() {
         // If active file has changed, then read metadata of new file.
         if active_file_path != previous_file_path {
             // Create and fill new MetadataPackage.
-            let metadata_pack = read_metadata(&active_file_path, &config_values.va_individual_album).unwrap();
+            let metadata_pack = read_metadata(&active_file_path, &config_values.va_album_individual).unwrap();
             println!("album_artist: {}\nalbum: {}\nartist: {}\ntitle: {}", metadata_pack.album_artist.unwrap(), metadata_pack.album.unwrap(), metadata_pack.artist, metadata_pack.title);
             println!("Album art filename: {}", metadata_pack.album_art.unwrap().filename);
             //fs::write("/home/zera/workspace/test.jpg", metadata_pack.album_art.unwrap().data).unwrap();
@@ -257,7 +257,7 @@ fn load_config() -> Config {
                   Default is 5.
                 - run_secondary_checks determines whether or not player-specific secondary verification of status
                   should be performed. Default is true.
-                - va_individual_album indidcates whether or not tracks with "Various Artists" as the album artist
+                - va_album_individual indidcates whether or not tracks with "Various Artists" as the album artist
                   should have their album fields blank and album art processed individually. Default is true.
             */ 
             match config_file {
@@ -265,7 +265,7 @@ fn load_config() -> Config {
                     let _ = write!(config_file.expect("Configuration file should exist and be accessible at this point."), "player_name = \'cmus\'\n\
                                                                                                                             player_check_delay = 5\n\
                                                                                                                             run_secondary_checks = true\n\
-                                                                                                                            va_individual_album = true\n");
+                                                                                                                            va_album_individual = true\n");
                 },
                 Err(e) => {
                     error_log::log_error("Config Error", &e.to_string().as_str());
@@ -277,7 +277,7 @@ fn load_config() -> Config {
                 player_name: String::from("cmus"),
                 player_check_delay: 5,
                 run_secondary_checks: true,
-                va_individual_album: true,
+                va_album_individual: true,
             };
             return config_values;
         },
@@ -308,12 +308,12 @@ fn get_status_by_pid(sys: &System, player_pid: &sysinfo::Pid) -> ProcessStatus {
     }
 }
 
-fn read_metadata(active_file_path: &String, va_individual_album: &bool) -> Option<MetadataPackage> {
+fn read_metadata(active_file_path: &String, va_album_individual: &bool) -> Option<MetadataPackage> {
     // Determine which tag reader to used based on file extension.
     //FIX MATCH
     match active_file_path.rsplit_once('.').unwrap().1 {
-        "flac" => return read_vorbis(&active_file_path, &va_individual_album),
-        "mp3" | "wav" => return read_id3(&active_file_path, &va_individual_album),
+        "flac" => return read_vorbis(&active_file_path, &va_album_individual),
+        "mp3" | "wav" => return read_id3(&active_file_path, &va_album_individual),
         _ => {
             error_log::log_error("File Error", format!("The file at {} is not in a supported format.", active_file_path).as_str());
             return None;
@@ -337,7 +337,7 @@ fn hash_filename(album_artist: &Option<String>, album: &Option<String>, year: Op
     return hashed_filename;
 }
 
-fn read_vorbis(active_file_path: &String, va_individual_album: &bool) -> Option<MetadataPackage> {
+fn read_vorbis(active_file_path: &String, va_album_individual: &bool) -> Option<MetadataPackage> {
     match FlacReader::open(&active_file_path) {
         Ok(vorbis_tag) => {
             let mut metadata_pack = MetadataPackage::default();
@@ -366,8 +366,8 @@ fn read_vorbis(active_file_path: &String, va_individual_album: &bool) -> Option<
                 metadata_pack.album = None;
             }
 
-            // If va_individual_album is enabled, album_artist is "Various Artists", and the album is "Various Artists", album tag is not kept.
-            if *va_individual_album && album_artist_vec[0] == String::from("Various Artists") && album_vec[0] == String::from("Various Artists") {
+            // If va_album_individual is enabled, album_artist is "Various Artists", and the album is "Various Artists", album tag is not kept.
+            if *va_album_individual && album_artist_vec[0] == String::from("Various Artists") && album_vec[0] == String::from("Various Artists") {
                 metadata_pack.album = None;
             }
 
@@ -414,7 +414,7 @@ fn read_vorbis(active_file_path: &String, va_individual_album: &bool) -> Option<
 
             // album_art
             /*
-                Determine whether or not to extract and upload image here. Based on va_individual_album.
+                Determine whether or not to extract and upload image here. Based on va_album_individual.
             */
             match FlacTag::read_from_path(&active_file_path) {
                 Ok(flac_tag) => {
@@ -458,7 +458,7 @@ fn read_vorbis(active_file_path: &String, va_individual_album: &bool) -> Option<
     }
 }
 
-fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<MetadataPackage> {
+fn read_id3(active_file_path: &String, va_album_individual: &bool) -> Option<MetadataPackage> {
     match Tag::read_from_path(&active_file_path) {
         Ok(id3_tag) => {
             let mut metadata_pack = MetadataPackage::default();
@@ -475,9 +475,9 @@ fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<Met
             }
             
             // album
-            // If va_individual_album is enabled, album_artist is "Various Artists", and album is "Various Artists", album tag is not kept.
+            // If va_album_individual is enabled, album_artist is "Various Artists", and album is "Various Artists", album tag is not kept.
             let album_tag = id3_tag.album().map(|album| album.to_string()).unwrap_or_default();
-            if (*va_individual_album && album_artist_compare == String::from("Various Artists") && album_tag == String::from("Various Artists")) 
+            if (*va_album_individual && album_artist_compare == String::from("Various Artists") && album_tag == String::from("Various Artists")) 
                 || album_tag == String::default() {
                 metadata_pack.album = None;
             } else {
@@ -522,7 +522,7 @@ fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<Met
             
             // album_art
             /*
-                Determine whether or not to extract and upload image here. Based on va_individual_album.
+                Determine whether or not to extract and upload image here. Based on va_album_individual.
             */
             let extracted_images = id3_tag.pictures().collect::<Vec<_>>();
             if extracted_images.len() > 0 {
