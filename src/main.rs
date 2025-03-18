@@ -1,12 +1,21 @@
+use std::convert::TryFrom;
 use std::env;
+use std::fs::File;
+use std::io::Cursor;
 use std::thread;
 use std::time::Duration;
 use audiotags::components::FlacTag;
-use audiotags::{AudioTagEdit, MimeType};
+use audiotags::{Album, AudioTagEdit, MimeType};
 use claxon::FlacReader;
 use id3::{Content, Tag, TagLike};
 use serde::Deserialize;
 use sysinfo::{Pid, ProcessStatus, ProcessesToUpdate, ProcessRefreshKind, RefreshKind, System};
+use image::codecs::jpeg::JpegEncoder;
+use image::codecs::png::PngEncoder;
+use image::{ImageEncoder, ImageReader};
+use std::io::BufWriter;
+use fast_image_resize::images::Image;
+use fast_image_resize::{IntoImageView, Resizer, ResizeOptions};
 
 mod error_log;
 use error_log::fs;
@@ -51,8 +60,8 @@ struct Config {
     va_individual_album: bool,
 }
 
-struct Image {
-    mime_type: String,
+struct AlbumArt {
+    filename: String,
     data: Vec<u8>,
 }
 
@@ -61,7 +70,7 @@ struct MetadataPackage {
     album: Option<String>,
     artist: String,
     title: String,
-    album_art: Option<Image>,
+    album_art: Option<AlbumArt>,
 }
 
 impl Default for MetadataPackage {
@@ -75,6 +84,9 @@ impl Default for MetadataPackage {
         }
     }
 }
+
+// Global CRC32 hasher for album art filename hashing
+const CRC32: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_CKSUM);
 
 fn main() {
     let config_values: Config = load_config();
@@ -114,7 +126,7 @@ fn main() {
     let mut active_file_path = String::new();   // The path of the currently playing track.
     let mut previous_file_path = String::new(); // The path of the previous track, used to determine when the active track has changed.
     let mut active_position_duration: (Option<u32>, Option<u32>) = (None, None); // The position of current playback and duration of audio file.
-
+    
     // Begin main loop
     while player_status != ProcessStatus::Stop {
         // Update active file path, duration, and position
@@ -126,7 +138,43 @@ fn main() {
             // Create and fill new MetadataPackage.
             let metadata_pack = read_metadata(&active_file_path, &config_values.va_individual_album).unwrap();
             println!("album_artist: {}\nalbum: {}\nartist: {}\ntitle: {}", metadata_pack.album_artist.unwrap(), metadata_pack.album.unwrap(), metadata_pack.artist, metadata_pack.title);
-            fs::write("/home/zera/workspace/test.jpg", metadata_pack.album_art.unwrap().data).unwrap();
+            println!("Album art filename: {}", metadata_pack.album_art.unwrap().filename);
+            //fs::write("/home/zera/workspace/test.jpg", metadata_pack.album_art.unwrap().data).unwrap();
+            /* let mut reader = ImageReader::new(Cursor::new(metadata_pack.album_art.unwrap().data))
+                .with_guessed_format()
+                .expect("Cursor io never fails");
+            //let mut reader = ImageReader::open("/home/zera/workspace/folder.jpg").unwrap();
+            let img = reader.decode().unwrap();
+            let sizes = (img.width(), img.height());
+            println!("Dimensions: {}, {}", sizes.0, sizes.1);
+
+            
+            let dst_width: u32;
+            let dst_height: u32;
+            if sizes.0 < 512 || sizes.1 < 512 {
+                //dst_image = Image::new(512, 512, img.pixel_type().unwrap(),);
+                dst_width = 512;
+                dst_height = 512;
+            } else {
+                //dst_image = Image::new(sizes.0, sizes.1, img.pixel_type().unwrap(),);
+                dst_width = 1024;
+                dst_height = 1024;
+            }
+            let mut dst_image = Image::new(dst_width, dst_height, img.pixel_type().unwrap(),);
+
+            let mut resizer = Resizer::new();
+            resizer.resize(&img, &mut dst_image, &ResizeOptions::new().fit_into_destination(Some((0.5,0.5))),).unwrap();
+
+            let mut result_buf = BufWriter::new(File::create("/home/zera/workspace/test.jpg").unwrap());
+            JpegEncoder::new(&mut result_buf)
+                .write_image(
+                    dst_image.buffer(),
+                    dst_width,
+                    dst_height,
+                    img.color().into(),
+                )
+                .unwrap();
+            //fs::write("/home/zera/workspace/test.jpg", result_buf.buffer()).unwrap(); */
         }
 
         // Refresh system to get updates to player process
@@ -273,6 +321,22 @@ fn read_metadata(active_file_path: &String, va_individual_album: &bool) -> Optio
     }
 }
 
+fn hash_filename(album_artist: &Option<String>, album: &Option<String>, year: Option<u16>, mime_type: &str, image_data: &Vec<u8>) -> String {
+    // Construct (probably) album-unique string to be hashed as first half of filename.
+    let mut metadata_string = String::new();
+    // Concat album_artist if Some.
+    metadata_string.push_str(album_artist.clone().unwrap_or(String::from("0")).as_str());
+    // Concat album if Some.
+    metadata_string.push_str(album.clone().unwrap_or(String::from("0")).as_str());
+    // Concat year if Some.
+    metadata_string.push_str(year.unwrap_or(0).to_string().as_str());
+
+    // Hash metadata string and image bytes for first and second halves of filename, then concat image extension.
+    let mut hashed_filename = format!("{}-{}", CRC32.checksum(metadata_string.as_bytes()).to_string(), CRC32.checksum(image_data).to_string());
+    hashed_filename.push_str(mime_type);
+    return hashed_filename;
+}
+
 fn read_vorbis(active_file_path: &String, va_individual_album: &bool) -> Option<MetadataPackage> {
     match FlacReader::open(&active_file_path) {
         Ok(vorbis_tag) => {
@@ -329,6 +393,25 @@ fn read_vorbis(active_file_path: &String, va_individual_album: &bool) -> Option<
                 return None;
             }
 
+            // year
+            // Used only for constructing filename hash, not included in metadata package.
+            let mut year_vec = Vec::<&str>::new();
+            let album_year: Option<u16>;
+            for year in vorbis_tag.get_tag("year") {
+                year_vec.push(year);
+            }
+            if year_vec.len() > 0 {
+                match year_vec[0].parse::<u16>() {
+                    Ok(y) => album_year = Some(y),
+                    Err(parse_error) => {
+                        error_log::log_error("Metadata Error", format!("Year tagged on file {} is not a u16 integer: {}", &active_file_path, parse_error.to_string()).as_str());
+                        album_year = None;
+                    }
+                }
+            } else {
+                album_year = None;
+            }
+
             // album_art
             /*
                 Determine whether or not to extract and upload image here. Based on va_individual_album.
@@ -337,14 +420,16 @@ fn read_vorbis(active_file_path: &String, va_individual_album: &bool) -> Option<
                 Ok(flac_tag) => {
                     match flac_tag.album_cover() {
                         Some(album_art) => {
-                            let new_image: Image;
+                            let new_image: AlbumArt;
                             match album_art.mime_type {
-                                MimeType::Png =>  {
-                                    new_image = Image { mime_type: "png".to_owned(), data: album_art.data.to_vec() };
+                                MimeType::Jpeg => {
+                                    // Hash album art filename
+                                    new_image = AlbumArt { filename: hash_filename(&metadata_pack.album_artist, &metadata_pack.album, album_year, ".jpg", &album_art.data.to_vec()), data: album_art.data.to_vec() };
                                     metadata_pack.album_art = Some(new_image);
                                 },
-                                MimeType::Jpeg => {
-                                    new_image = Image { mime_type: "jpg".to_owned(), data: album_art.data.to_vec() };
+                                MimeType::Png =>  {
+                                    // Hash album art filename
+                                    new_image = AlbumArt { filename: hash_filename(&metadata_pack.album_artist, &metadata_pack.album, album_year, ".png", &album_art.data.to_vec()), data: album_art.data.to_vec() };
                                     metadata_pack.album_art = Some(new_image);
                                 },
                                 _a => { // For any other types
@@ -399,7 +484,6 @@ fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<Met
             
             // artist (Tag is required for basic functionality, so return None if not present)
             match id3_tag.artists() {
-                //Some(artists) => metadata_pack.artist = artists.into_iter().map(|v| v.to_owned()).join(", "),
                 Some(artists) => {
                     metadata_pack.artist = artists.join(", ");
                 },
@@ -417,6 +501,22 @@ fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<Met
                     return None;
                 }
             }
+
+            // year
+            // Used only for constructing filename hash, not included in metadata package.
+            let album_year: Option<u16>;
+            match id3_tag.year() {
+                Some(year) => {
+                    match u16::try_from(year) {
+                        Ok(y) => album_year = Some(y),
+                        Err(parse_error) => {
+                            error_log::log_error("Metadata Error", format!("Year tagged on file {} is not a u16 integer: {}", &active_file_path, parse_error.to_string()).as_str(),);
+                            album_year = None;
+                        }
+                    }
+                }
+                None => album_year = None,
+            };
             
             // album_art
             /*
@@ -426,8 +526,13 @@ fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<Met
             if extracted_images.len() > 0 {
                 match Content::Picture(extracted_images[0].clone()).picture() {
                     Some(album_art) => {
-                        let new_image = Image { mime_type: album_art.mime_type.clone(), data: album_art.data.clone() };
-                        metadata_pack.album_art = Some(new_image);
+                        let new_image: Option<AlbumArt>;
+                        match album_art.mime_type.as_str() {
+                            "image/jpeg"=> new_image = Some(AlbumArt { filename: hash_filename(&metadata_pack.album_artist, &metadata_pack.album, album_year, ".jpg", &album_art.data), data: album_art.data.clone() }),
+                            "image/png" => new_image = Some(AlbumArt { filename: hash_filename(&metadata_pack.album_artist, &metadata_pack.album, album_year, ".png", &album_art.data), data: album_art.data.clone() }),
+                            _ => new_image = None,
+                        }
+                        metadata_pack.album_art = new_image;
                     }
                     None => metadata_pack.album_art = None,
                 }
@@ -438,7 +543,7 @@ fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<Met
             return Some(metadata_pack);
         }
         Err(id3_error) => {
-            error_log::log_error("Metadata Error", format!("ID3 tags could not be read from the file at {}:\n{}", active_file_path, id3_error).as_str());
+            error_log::log_error("Metadata Error", format!("ID3 tags could not be read from the file at {}:\n{}", &active_file_path, id3_error).as_str());
             return None;
         }    
     }
