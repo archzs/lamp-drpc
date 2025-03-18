@@ -356,19 +356,19 @@ fn read_vorbis(active_file_path: &String, va_individual_album: &bool) -> Option<
             }
 
             // album
-            // If va_individual_album is enabled and album_artist is "Various Artists", album tag is not recorded.
-            if *va_individual_album && album_artist_vec[0] == String::from("Various Artists") {
-                metadata_pack.album = None;
+            let mut album_vec = Vec::<&str>::new();
+            for album in vorbis_tag.get_tag("album") {
+                album_vec.push(album);
+            }
+            if album_vec.len() > 0 {
+                metadata_pack.album = Some(album_vec[0].to_owned());
             } else {
-                let mut album_vec = Vec::<&str>::new();
-                for album in vorbis_tag.get_tag("album") {
-                    album_vec.push(album);
-                }
-                if album_vec.len() > 0 {
-                    metadata_pack.album = Some(album_vec[0].to_owned());
-                } else {
-                    metadata_pack.album = None;
-                }
+                metadata_pack.album = None;
+            }
+
+            // If va_individual_album is enabled, album_artist is "Various Artists", and the album is "Various Artists", album tag is not kept.
+            if *va_individual_album && album_artist_vec[0] == String::from("Various Artists") && album_vec[0] == String::from("Various Artists") {
+                metadata_pack.album = None;
             }
 
             // artist (Tag is required for basic functionality, so return None if not present)
@@ -475,11 +475,13 @@ fn read_id3(active_file_path: &String, va_individual_album: &bool) -> Option<Met
             }
             
             // album
-            // If va_individual_album is enabled and album_artist is "Various Artists", album tag is not recorded.
-            if *va_individual_album && album_artist_compare == String::from("Various Artists") {
+            // If va_individual_album is enabled, album_artist is "Various Artists", and album is "Various Artists", album tag is not kept.
+            let album_tag = id3_tag.album().map(|album| album.to_string()).unwrap_or_default();
+            if (*va_individual_album && album_artist_compare == String::from("Various Artists") && album_tag == String::from("Various Artists")) 
+                || album_tag == String::default() {
                 metadata_pack.album = None;
             } else {
-                metadata_pack.album = id3_tag.album().map(|album| album.to_string());
+                metadata_pack.album = Some(album_tag);
             }
             
             // artist (Tag is required for basic functionality, so return None if not present)
