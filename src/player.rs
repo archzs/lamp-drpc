@@ -93,7 +93,7 @@ impl StandardPlayer for Cmus {
                 active_file_position = output_string_lines[3].strip_prefix("position ");
             },
             &_ => {
-                error_log::log_error("Error", format!("First line of cmus-remote output is unrecognized:\n\t{}", output_string_lines[0]).as_str());
+                // cmus has exited.
                 process::exit(1);
             }
         }

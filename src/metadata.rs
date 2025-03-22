@@ -35,7 +35,6 @@ const CRC32: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_CKSUM);
 
 pub fn read_metadata(active_file_path: &String, va_album_individual: &bool) -> Option<MetadataPackage> {
     // Determine which tag reader to used based on file extension.
-    //FIX MATCH
     match active_file_path.rsplit_once('.').unwrap().1 {
         "flac" => return read_vorbis(&active_file_path, &va_album_individual),
         "mp3" | "wav" => return read_id3(&active_file_path, &va_album_individual),
@@ -57,8 +56,8 @@ fn hash_filename(album_artist: &Option<String>, album: &Option<String>, year: Op
     metadata_string.push_str(year.unwrap_or(0).to_string().as_str());
 
     // Hash metadata string and image bytes for first and second halves of filename, then concat image extension.
-    let mut hashed_filename = format!("{}-{}", CRC32.checksum(metadata_string.as_bytes()).to_string(), CRC32.checksum(image_data).to_string());
-    hashed_filename.push_str(mime_type);
+    let hashed_filename = format!("{}-{}{}", CRC32.checksum(metadata_string.as_bytes()).to_string(), CRC32.checksum(image_data).to_string(), mime_type);
+    println!("{}", hashed_filename);
     return hashed_filename;
 }
 
@@ -92,8 +91,10 @@ fn read_vorbis(active_file_path: &String, va_album_individual: &bool) -> Option<
             }
 
             // If va_album_individual is enabled, album_artist is "Various Artists", and the album is "Various Artists", album tag is not kept.
-            if *va_album_individual && album_artist_vec[0] == String::from("Various Artists") && album_vec[0] == String::from("Various Artists") {
-                metadata_pack.album = None;
+            if album_artist_vec.len() > 0 {
+                if *va_album_individual && album_artist_vec[0] == String::from("Various Artists") && album_vec[0] == String::from("Various Artists") {
+                    metadata_pack.album = None;
+                }
             }
 
             // artist (Tag is required for basic functionality, so return None if not present)
