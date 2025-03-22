@@ -134,6 +134,7 @@ fn main() {
     // Declare variables for use in main loop
     let mut active_file_path = String::new();   // The path of the currently playing track.
     let mut previous_file_path = String::new(); // The path of the previous track, used to determine when the active track has changed.
+    let mut active_file_image_link= String::new(); // Link to the album art of the currently playing track, hosted on Imgur.
     let mut active_position_duration: (Option<u32>, Option<u32>) = (None, None); // The position of current playback and duration of audio file.
     
     // Begin main loop
@@ -164,6 +165,7 @@ fn main() {
                             match trpl::run(write_album_art(album_art, config_values.imgur.clone().unwrap())) {
                                 Ok(filename_link_pair) => {
                                     filename_hash.insert(filename_link_pair.0, filename_link_pair.1);
+                                    write_to_hash_file(&filename_hash);
                                 },
                                 Err(image_error) => {
                                     error_log::log_error("Image Error", format!("Error while processing album art image on file {}: {}", &active_file_path, image_error.to_string()).as_str());
@@ -449,6 +451,41 @@ fn load_hash_file() -> Result<HashMap<String, String>, Box<dyn std::error::Error
     }
 
     Ok(filename_hash)
+}
+
+fn write_to_hash_file(filename_hash: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+    // Check for hashed link file. If it exists, read it, otherwise create blank one.
+    let config_dir_path: String; 
+    match env::home_dir() {
+        Some(path) => {
+            config_dir_path = path.to_str().unwrap().to_owned() + "/.config/lamp-drpc";
+        },
+        None => {
+            eprintln!("Error: Could not find home directory.");
+            process::exit(1);
+        },
+    }
+
+    let hash_file_path = config_dir_path + "/link_hash.json";
+    match fs::exists(&hash_file_path) {
+        Ok(true) | Ok(false) => {
+            // Write to hash file. If it does not exist, create it again and write to it.
+            let mut hash_file = fs::OpenOptions::new()
+                                        .read(false)
+                                        .write(true)
+                                        .truncate(true)
+                                        .create(true)
+                                        .open(&hash_file_path)?;
+            
+            let hash_string = serde_json::to_string_pretty(&filename_hash)?;
+            write!(hash_file, "{}", hash_string)?;
+        },
+        Err(e) => {
+            return Err(Box::from(e));
+        }
+    }
+
+    Ok(())
 }
 
 fn get_pid_by_proc_name(sys: &System, proc_name: &String) -> sysinfo::Pid {
