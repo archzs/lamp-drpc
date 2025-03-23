@@ -1,11 +1,10 @@
-use std::any::Any;
 use std::env;
 use std::collections::HashMap;
 use std::fs::{remove_file, File};
 use std::io::{BufReader, Cursor};
 use std::thread;
 use std::time::Duration;
-use discord_presence::models::{Activity, ActivityTimestamps, ActivityType};
+use discord_presence::models::{ActivityTimestamps, ActivityType};
 use serde::Deserialize;
 use serde_json::{Deserializer, Serializer, Value};
 use sysinfo::{Pid, ProcessStatus, ProcessesToUpdate, ProcessRefreshKind, RefreshKind, System};
@@ -93,11 +92,20 @@ struct Config {
 }
 
 fn main() {
-    let mut config_values: Config = load_config();
+    // Load configuration values from config file.
+    let config_values: Config = match load_config() {
+        Ok(config_values) => config_values,
+        Err(e) => {
+            error_log::log_error("main:load_config Error", e.to_string().as_str());
+            process::exit(1);
+        }
+    };
+
+    // Load HashMap from list stored in hash file.
     let mut filename_hash = match load_hash_file() {
         Ok(filename_hash) => filename_hash,
         Err(e) => {
-            error_log::log_error("Hash File Error", e.to_string().as_str());
+            error_log::log_error("main:load_hash_file Error", e.to_string().as_str());
             process::exit(1);
         }
     };
@@ -306,62 +314,61 @@ fn main() {
     let _ = discord_client.shutdown();
 }
 
-fn load_config() -> Config {
-    // Check if config directory exists at $HOME/.config/lamp-drpc, create it if it does not.
-    let config_dir_path;
-    match env::home_dir() {
-        Some(path) => {
-            config_dir_path = path.to_str().unwrap().to_owned() + "/.config/lamp-drpc";
-        },
+fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
+    // Attempt to locate home directory and specify config directory.
+    let config_dir_path: String = match env::home_dir() {
+        Some(path) => path.to_str().unwrap().to_owned() + "/.config/lamp-drpc",
         None => {
-            eprintln!("Error: Could not find home directory.");
+            eprintln!("main:load_config:home_dir Error: Could not find home directory.");
             process::exit(1);
-        },
-    }
+        }
+    };
+
+    // Determine if config directory exists and is a directory.
     match fs::exists(&config_dir_path) {
-        Ok(true) if Path::new(&config_dir_path.as_str()).is_dir() => {},
+        // Config directory exists and is a directory, do nothing.
+        Ok(true) if Path::new(&config_dir_path.as_str()).is_dir() => (),
         Ok(true) => { 
-            // File exists at configuration directory path, but is not a directory.
-            eprintln!("Error: file at {} is not a directory.", config_dir_path);
+            // File exists at config directory path, but is not a directory.
+            eprintln!("main:load_config:exists(&config_dir_path) => Ok(true) Error: File at config directory path \"{}\" is not a directory.", config_dir_path);
             process::exit(1);
         },
         Ok(false) => {
-            // Configuration directory does not exist, create it now.
+            // Config directory does not exist, create it now.
             match fs::create_dir_all(&config_dir_path) {
                 Ok(_) => {},
                 Err(e) =>  {
-                    eprintln!("Error: {}", e);
+                    eprintln!("main:load_config:exists(&config_dir_path):create_dir_all(&config_dir_path) Error: {}", e);
                     process::exit(1);
                 },
             }
         },
         Err(e) => { 
-            eprintln!("Error: {}", e); 
+            eprintln!("main:load_config:exists(&config_dir_path) Error: {}", e); 
             process::exit(1); 
-        },
+        }
     }
     
-    // Check for configuration file. If it exists, read it, otherwise, create with default values.
+    // Check for configuration file. If it exists, read it. Otherwise, create with default values.
     let config_file_path = config_dir_path + "/lamp.toml";
     match fs::exists(&config_file_path) {
         Ok(true) => {
-            // Read existing configuration file.         
-            let toml_string = fs::read_to_string(config_file_path).ok().unwrap_or(String::from("player_name = \'cmus\'"));
+            // Config file exists, read in values.
+            let toml_string = fs::read_to_string(config_file_path)?;
             match toml::from_str(toml_string.as_str()) {
-                Ok(config_values) => return config_values,
+                Ok(config_values) => return Ok(config_values),
                 Err(e) => {
-                    error_log::log_error("toml Error", &e.message());
-                    process::exit(1);
+                    return Err(Box::from(e));
                 }
             }
         },
         Ok(false) => {
             // Configuration file does not exist, create it now and write default values to it.
-            let config_file = fs::OpenOptions::new()
+            let mut config_file = fs::OpenOptions::new()
                                 .read(false)
                                 .write(true)
                                 .create(true)
-                                .open(config_file_path);
+                                .open(config_file_path)?;
             
             /* 
                 Set default configuration values.
@@ -381,20 +388,12 @@ fn load_config() -> Config {
 
                 Since it is optional, the following must be added to the config file to use Imgur functionality:
                 [imgur]
-                clientId = ''
+                clientId = 'xxxxxx'
             */ 
-            match config_file {
-                Ok(_) =>  {
-                    let _ = write!(config_file.expect("Configuration file should exist and be accessible at this point."), "player_name = \'cmus\'\n\
-                                                                                                                            player_check_delay = 5\n\
-                                                                                                                            run_secondary_checks = true\n\
-                                                                                                                            va_album_individual = true\n");
-                },
-                Err(e) => {
-                    error_log::log_error("Config Error", &e.to_string().as_str());
-                    process::exit(1);
-                },
-            }
+            write!(config_file,"player_name = \'cmus\'\n\
+                                player_check_delay = 5\n\
+                                run_secondary_checks = true\n\
+                                va_album_individual = true\n")?;
 
             let config_values = Config {
                 player_name: String::from("cmus"),
@@ -403,12 +402,12 @@ fn load_config() -> Config {
                 va_album_individual: true,
                 imgur: None,
             };
-            return config_values;
+
+            return Ok(config_values);
         },
         Err(e) => { 
-            error_log::log_error("Config Error", &e.to_string().as_str());
-            process::exit(1); 
-        },
+            return Err(Box::from(e));
+        }
     }
 }
 
