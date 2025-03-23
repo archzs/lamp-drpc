@@ -8,12 +8,12 @@ use crate::error_log::process;
 pub trait StandardPlayer {
     fn verify_running(&self) -> bool;
     fn get_active_file_path(&mut self) -> String;
-    fn get_position_and_duration(&self) -> (Option<u32>, Option<u32>);
+    fn get_position_and_duration(&self) -> (Option<u64>, Option<u64>);
 }
 
 pub struct Cmus {
     pub cmus_remote_output: String,
-    active_position_duration: (Option<u32>, Option<u32>),
+    active_position_duration: (Option<u64>, Option<u64>),
 }
 
 impl Default for Cmus {
@@ -99,7 +99,7 @@ impl StandardPlayer for Cmus {
         }
 
         // Check str options. If duration and position could not be parsed, set to None. 
-        match active_file_duration.unwrap_or_default().parse::<u32>() {
+        match active_file_duration.unwrap_or_default().parse::<u64>() {
             Ok(duration) => self.active_position_duration.1 = Some(duration),
             Err(parse_error) => {
                 error_log::log_error("Parse Int Error", parse_error.to_string().as_str());
@@ -107,7 +107,7 @@ impl StandardPlayer for Cmus {
             }
         }
 
-        match active_file_position.unwrap_or_default().parse::<u32>() {
+        match active_file_position.unwrap_or_default().parse::<u64>() {
             Ok(position) => self.active_position_duration.0 = Some(position),
             Err(parse_error) => {
                 error_log::log_error("Parse Int Error", parse_error.to_string().as_str());
@@ -118,7 +118,7 @@ impl StandardPlayer for Cmus {
         active_file_path
     }
 
-    fn get_position_and_duration(&self) -> (Option<u32>, Option<u32>) {
+    fn get_position_and_duration(&self) -> (Option<u64>, Option<u64>) {
         self.active_position_duration
     }
 }

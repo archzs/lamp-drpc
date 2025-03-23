@@ -1,9 +1,11 @@
+use std::any::Any;
 use std::env;
 use std::collections::HashMap;
 use std::fs::{remove_file, File};
 use std::io::{BufReader, Cursor};
 use std::thread;
 use std::time::Duration;
+use discord_presence::models::{Activity, ActivityTimestamps, ActivityType};
 use serde::Deserialize;
 use serde_json::{Deserializer, Serializer, Value};
 use sysinfo::{Pid, ProcessStatus, ProcessesToUpdate, ProcessRefreshKind, RefreshKind, System};
@@ -13,8 +15,9 @@ use image::{DynamicImage, ImageEncoder, ImageFormat, ImageReader};
 use std::io::BufWriter;
 use fast_image_resize::images::Image;
 use fast_image_resize::{IntoImageView, Resizer, ResizeOptions};
-use http::{Method, StatusCode};
+use http::{request, Method, StatusCode};
 use imgurs::{send_api_request, ImgurClient};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod error_log;
 use error_log::fs;
@@ -48,7 +51,7 @@ impl StandardPlayer for MusicPlayer {
         }
     }
 
-    fn get_position_and_duration(&self) -> (Option<u32>, Option<u32>) {
+    fn get_position_and_duration(&self) -> (Option<u64>, Option<u64>) {
         match self {
             MusicPlayer::Cmus(cmus) => return Cmus::get_position_and_duration(&cmus),
         }
@@ -106,7 +109,7 @@ fn main() {
     match config_values.player_name.as_str() {
         "cmus" => active_music_player = MusicPlayer::Cmus(Cmus::default()),
         _ => {
-            error_log::log_error("Error", format!("The player_name \"{}\" provided in the lamp.toml configuration file is unsupported.", config_values.player_name).as_str());
+            error_log::log_error("main: active_music_player match Error", format!("The player_name \"{}\" provided in the lamp.toml configuration file is unsupported.", config_values.player_name).as_str());
             process::exit(1); 
         }
     }
@@ -135,9 +138,13 @@ fn main() {
     let mut active_file_path = String::new();   // The path of the currently playing track.
     let mut previous_file_path = String::new(); // The path of the previous track, used to determine when the active track has changed.
     let mut active_file_image_link = Some(String::new()); // Link to the album art of the currently playing track, hosted on Imgur.
-    let mut active_position_duration: (Option<u32>, Option<u32>) = (None, None); // The position of current playback and duration of audio file.
+    let mut active_position_duration: (Option<u64>, Option<u64>) = (None, None); // The position of current playback and duration of audio file.
+    let mut metadata_pack = MetadataPackage::default();
     let http_client = reqwest::Client::new();
-    
+    let mut discord_client = discord_presence::Client::new(1353193853393571910);
+    discord_client.start();
+    thread::sleep(sleep_time);
+
     // Begin main loop
     while player_status != ProcessStatus::Stop {
         // Update active file path, duration, and position
@@ -147,7 +154,14 @@ fn main() {
         // If active file has changed, then read metadata of new file.
         if active_file_path != previous_file_path {
             // Create and fill new MetadataPackage.
-            let metadata_pack = read_metadata(&active_file_path, &config_values.va_album_individual).unwrap();
+            metadata_pack = read_metadata(&active_file_path, &config_values.va_album_individual).unwrap();
+
+            match discord_client.clear_activity() {
+                Ok(_) => (),
+                Err(e) => {
+                    error_log::log_error("main: Discord Error on album art update", e.to_string().as_str());
+                }
+            }
 
             // Check if Imgur information is defined in config file.
             // clientId known to be defined, since an error would have already been thrown otherwise.
@@ -170,7 +184,12 @@ fn main() {
                                     active_file_image_link = Some(image_link.clone());
                                 } else { // Link is bad, upload again and update in hash map.
                                     // Clear current rich presence information so not visible while uploading.
-                                    //todo!();
+                                    /* match discord_client.clear_activity() {
+                                        Ok(_) => (),
+                                        Err(e) => {
+                                            error_log::log_error("main: Discord Error on album art update", e.to_string().as_str());
+                                        }
+                                    } */
 
                                     match trpl::run(write_album_art(album_art, config_values.imgur.clone().unwrap())) {
                                         Ok(filename_link_pair) => {
@@ -188,7 +207,12 @@ fn main() {
                             // Filename does not exist in hash map.
                             None => {
                                 // Clear current rich presence information so not visible while uploading.
-                                //todo!();
+                                /* match discord_client.clear_activity() {
+                                    Ok(_) => (),
+                                    Err(e) => {
+                                        error_log::log_error("main: Discord Error on album art update", e.to_string().as_str());
+                                    }
+                                } */
 
                                 match trpl::run(write_album_art(album_art, config_values.imgur.clone().unwrap())) {
                                     Ok(filename_link_pair) => {
@@ -208,9 +232,63 @@ fn main() {
             } else {
                 active_file_image_link = None;
             }
-            thread::sleep(rest_time);
-        }
 
+            let album_name_defined = metadata_pack.album.is_some();
+            let image_link_defined = active_file_image_link.is_some();
+
+            if album_name_defined && image_link_defined {
+                // Both the album and image link are defined. Apply both to Activity.
+                match discord_client.set_activity(|a| a._type(ActivityType::Listening)
+                                                                .state(&metadata_pack.artist)
+                                                                .details(&metadata_pack.title)
+                                                                .timestamps(|_t| ActivityTimestamps { start: (Some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs())), end: (Some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + active_position_duration.1.unwrap())) })
+                                                                .assets(|a| {a.large_image(&active_file_image_link.clone().unwrap())
+                                                                .large_text(metadata_pack.album.unwrap())}) ) {
+                    Ok(_) => (),
+                    Err(e) => {
+                        error_log::log_error("main: Discord Error on set_activity", e.to_string().as_str());
+                    }
+                }
+            } else if album_name_defined && !image_link_defined {
+                // Album is defined, but image link is None. Use default album image, but still apply album name.
+                match discord_client.set_activity(|a| a._type(ActivityType::Listening)
+                                                                .state(&metadata_pack.artist)
+                                                                .details(&metadata_pack.title)
+                                                                .timestamps(|_t| ActivityTimestamps { start: (Some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs())), end: (Some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + active_position_duration.1.unwrap())) })
+                                                                .assets(|a| {a.large_image("no_album_art")
+                                                                .large_text(metadata_pack.album.unwrap())}) ) {
+                    Ok(_) => (),
+                    Err(e) => {
+                        error_log::log_error("main: Discord Error on set_activity", e.to_string().as_str());
+                    }
+                }
+            } else if !album_name_defined && image_link_defined {
+                // Image link is defined, but album name is None. Apply provided image link, but no album name.
+                match discord_client.set_activity(|a| a._type(ActivityType::Listening)
+                                                                .state(&metadata_pack.artist)
+                                                                .details(&metadata_pack.title)
+                                                                .timestamps(|_t| ActivityTimestamps { start: (Some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs())), end: (Some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + active_position_duration.1.unwrap())) })
+                                                                .assets(|a| a.large_image(&active_file_image_link.clone().unwrap()))) {
+                    Ok(_) => (),
+                    Err(e) => {
+                        error_log::log_error("main: Discord Error on set_activity", e.to_string().as_str());
+                    }
+                }
+            } else {
+                // Both album and image link are None. Use defauly album image, do not provide album name.
+                match discord_client.set_activity(|a| a._type(ActivityType::Listening)
+                                                                .state(&metadata_pack.artist)
+                                                                .details(&metadata_pack.title)
+                                                                .timestamps(|_t| ActivityTimestamps { start: (Some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs())), end: (Some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + active_position_duration.1.unwrap())) })
+                                                                .assets(|a| a.large_image("no_album_art"))) {
+                    Ok(_) => (),
+                    Err(e) => {
+                        error_log::log_error("main: Discord Error on set_activity", e.to_string().as_str());
+                    }
+                }
+            }
+        }
+        
         // Refresh system to get updates to player process
         sys.refresh_processes_specifics(
             ProcessesToUpdate::Some(&[player_pid]),
@@ -225,6 +303,7 @@ fn main() {
         player_status = player_process.status();
         previous_file_path = active_file_path;
     }
+    let _ = discord_client.shutdown();
 }
 
 fn load_config() -> Config {
@@ -677,6 +756,22 @@ async fn upload_image(imgur_client: ImgurClient, imgur_info: &mut ImgurInfo, ima
         return Err(Box::from("Imgur clientId does not have enough credits remaining to upload an image."));
     }
 
+    /* let re_client = reqwest::Client::builder()
+                            .local_address(std::net::IpAddr::from([192, 168, 1, 23]))
+                            .build().unwrap();
+    let mut req = re_client.request(reqwest::Method::POST, format!("https://api.imgur.com/3/album/{}/add", imgur_info.clone().album_id.unwrap()).as_str());
+    req = req
+            .header("Authorization", format!("Bearer {}", &imgur_info.clone().access_token.unwrap()).as_str());
+
+    let hm = HashMap::from([
+        ("ids[]", "cQXDZZw")
+    ]);
+    req = req.form(&hm);
+    let request = req.build()?;
+    let resp = re_client.execute(request).await?;
+
+    println!("status: {}\nheaders: {:?}", resp.status(), resp.headers()); */
+
     /* // Check if access_token and refresh_token are defined.
     // If both are defined and accurate, moving into an album is supported.
     if imgur_info.access_token.clone().is_some() && imgur_info.refresh_token.clone().is_some() {
@@ -693,7 +788,7 @@ async fn upload_image(imgur_client: ImgurClient, imgur_info: &mut ImgurInfo, ima
                     let mut api_hash: HashMap<&str, String> = HashMap::from([("ids[]", uploaded.data.id.clone()),]);
                     let mut http_response = send_api_request(&imgur_client, Method::POST, format!("https://api.imgur.com/3/album/{}/add", album_id), Some(api_hash)).await?;
                     println!("status: {:?}", http_response.headers());
-                    // If 401 is returned, access_token may have expired..
+                    // If 401 is returned, access_token may have expired.
                     if http_response.status() == StatusCode::from_u16(401).unwrap() {
                         println!("401");
                         // Construct and send API request for new access_token.
