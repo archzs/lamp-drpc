@@ -1275,6 +1275,7 @@ dependencies = [
  "id3",
  "image",
  "imgurs",
+ "reqwest 0.12.15",
  "serde",
  "serde_json",
  "sysinfo",

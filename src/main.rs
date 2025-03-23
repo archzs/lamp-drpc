@@ -134,8 +134,9 @@ fn main() {
     // Declare variables for use in main loop
     let mut active_file_path = String::new();   // The path of the currently playing track.
     let mut previous_file_path = String::new(); // The path of the previous track, used to determine when the active track has changed.
-    let mut active_file_image_link= String::new(); // Link to the album art of the currently playing track, hosted on Imgur.
+    let mut active_file_image_link = Some(String::new()); // Link to the album art of the currently playing track, hosted on Imgur.
     let mut active_position_duration: (Option<u32>, Option<u32>) = (None, None); // The position of current playback and duration of audio file.
+    let http_client = reqwest::Client::new();
     
     // Begin main loop
     while player_status != ProcessStatus::Stop {
@@ -153,31 +154,61 @@ fn main() {
             if config_values.imgur.is_some() {
                 match metadata_pack.album_art {
                     Some(album_art) => {
-                        if filename_hash.contains_key(&album_art.filename) {
-                            // Test page is not 404
-                        } else {
-                            // Filename not already in hash map, so album art may not be in image host.
-                            // Write the image to a temporary file, upload it to image host, and add to hash map.
+                        match filename_hash.get(&album_art.filename) {
+                            // Filename exists in hash map.
+                            Some(image_link) => {
+                                // Link corresponding to filename is good, assign it to variable.
+                                let link_status_good = match trpl::run(get_link_status(&http_client, image_link)) {
+                                    Ok(link_status) => link_status,
+                                    Err(e) => {
+                                        error_log::log_error("main: link_status_good Error", e.to_string().as_str());
+                                        false
+                                    }
+                                };
+                                
+                                if link_status_good {
+                                    active_file_image_link = Some(image_link.clone());
+                                } else { // Link is bad, upload again and update in hash map.
+                                    // Clear current rich presence information so not visible while uploading.
+                                    //todo!();
 
-                            // Clear current rich presence information so not visible while uploading.
-                            //todo!();
+                                    match trpl::run(write_album_art(album_art, config_values.imgur.clone().unwrap())) {
+                                        Ok(filename_link_pair) => {
+                                            active_file_image_link = Some(filename_link_pair.1.clone());
+                                            filename_hash.insert(filename_link_pair.0, filename_link_pair.1);
+                                            write_to_hash_file(&filename_hash);
+                                        },
+                                        Err(image_error) => {
+                                            error_log::log_error("main: write_album_art Error", format!("Error while processing album art image on file {}: {}", &active_file_path, image_error.to_string()).as_str());
+                                        }
+                                    }
+                                }
+                                
+                            },
+                            // Filename does not exist in hash map.
+                            None => {
+                                // Clear current rich presence information so not visible while uploading.
+                                //todo!();
 
-                            match trpl::run(write_album_art(album_art, config_values.imgur.clone().unwrap())) {
-                                Ok(filename_link_pair) => {
-                                    filename_hash.insert(filename_link_pair.0, filename_link_pair.1);
-                                    write_to_hash_file(&filename_hash);
-                                },
-                                Err(image_error) => {
-                                    error_log::log_error("Image Error", format!("Error while processing album art image on file {}: {}", &active_file_path, image_error.to_string()).as_str());
+                                match trpl::run(write_album_art(album_art, config_values.imgur.clone().unwrap())) {
+                                    Ok(filename_link_pair) => {
+                                        active_file_image_link = Some(filename_link_pair.1.clone());
+                                        filename_hash.insert(filename_link_pair.0, filename_link_pair.1);
+                                        write_to_hash_file(&filename_hash);
+                                    },
+                                    Err(image_error) => {
+                                        error_log::log_error("main: write_album_art Error", format!("Error while processing album art image on file {}: {}", &active_file_path, image_error.to_string()).as_str());
+                                    }
                                 }
                             }
                         }
                     }
-                    None => (),
+                    None => active_file_image_link = None,
                 }
+            } else {
+                active_file_image_link = None;
             }
             thread::sleep(rest_time);
-            
         }
 
         // Refresh system to get updates to player process
@@ -408,6 +439,15 @@ fn update_config(new_access_token: String, new_refresh_token: String) -> Result<
     }
 
     Ok(())
+}
+
+async fn get_link_status(http_client: &reqwest::Client, image_link: &String) -> Result<bool, Box<dyn std::error::Error>> {
+    let response = http_client
+        .head(image_link)
+        .send()
+        .await?;
+
+    if response.status() == reqwest::StatusCode::OK { Ok(true) } else { Ok(false) }
 }
 
 fn load_hash_file() -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
