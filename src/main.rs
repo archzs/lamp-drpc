@@ -15,8 +15,8 @@ use std::io::BufWriter;
 use fast_image_resize::images::Image;
 use fast_image_resize::{IntoImageView, Resizer, ResizeOptions};
 use http::{request, Method, StatusCode};
-use imgurs::{send_api_request, ImgurClient};
 use std::time::{SystemTime, UNIX_EPOCH};
+use catbox::file::from_file;
 
 mod error_log;
 use error_log::fs;
@@ -57,38 +57,13 @@ impl StandardPlayer for MusicPlayer {
     }
 }
 
-#[derive(Clone, Deserialize)]
-struct ImgurInfo {
-    clientId: String,
-    clientSecret: String,
-    album_id: Option<String>,
-    access_token: Option<String>,
-    refresh_token: Option<String>,
-}
-
-impl ImgurInfo {
-    fn update_tokens(&mut self, new_access_token: String, new_refresh_token: String) {
-        self.access_token = Some(new_access_token.clone());
-        self.refresh_token = Some(new_refresh_token.clone());
-
-        // Update lamp.toml with new tokens.
-        match update_config(new_access_token, new_refresh_token) {
-            Ok(()) => (),
-            Err(e) => {
-                error_log::log_error("Config Update Error", e.to_string().as_str());
-                process::exit(1);
-            }
-        }
-    }
-}
-
 #[derive(Deserialize)]
 struct Config {
     player_name: String,
     player_check_delay: u64,
     run_secondary_checks: bool,
     va_album_individual: bool,
-    imgur: Option<ImgurInfo>,
+    catbox_user_hash: Option<String>,
 }
 
 fn main() {
@@ -164,42 +139,42 @@ fn main() {
             // Create and fill new MetadataPackage.
             metadata_pack = read_metadata(&active_file_path, &config_values.va_album_individual).unwrap();
 
-            match discord_client.clear_activity() {
+            /* match discord_client.clear_activity() {
                 Ok(_) => (),
                 Err(e) => {
                     error_log::log_error("main: Discord Error on album art update", e.to_string().as_str());
                 }
-            }
+            } */
 
             // Check if Imgur information is defined in config file.
             // clientId known to be defined, since an error would have already been thrown otherwise.
-            if config_values.imgur.is_some() {
+            if config_values.catbox_user_hash.is_some() {
                 match metadata_pack.album_art {
                     Some(album_art) => {
                         match filename_hash.get(&album_art.filename) {
                             // Filename exists in hash map.
                             Some(image_link) => {
                                 // Link corresponding to filename is good, assign it to variable.
-                                let link_status_good = match trpl::run(get_link_status(&http_client, image_link)) {
+                                /* let link_status_good = match trpl::run(get_link_status(&http_client, image_link)) {
                                     Ok(link_status) => link_status,
                                     Err(e) => {
                                         error_log::log_error("main: link_status_good Error", e.to_string().as_str());
                                         false
                                     }
-                                };
+                                }; */
                                 
-                                if link_status_good {
+                                if true {
                                     active_file_image_link = Some(image_link.clone());
                                 } else { // Link is bad, upload again and update in hash map.
                                     // Clear current rich presence information so not visible while uploading.
-                                    /* match discord_client.clear_activity() {
+                                    match discord_client.clear_activity() {
                                         Ok(_) => (),
                                         Err(e) => {
                                             error_log::log_error("main: Discord Error on album art update", e.to_string().as_str());
                                         }
-                                    } */
+                                    }
 
-                                    match trpl::run(write_album_art(album_art, config_values.imgur.clone().unwrap())) {
+                                    match trpl::run(write_album_art(album_art, &config_values.catbox_user_hash)) {
                                         Ok(filename_link_pair) => {
                                             active_file_image_link = Some(filename_link_pair.1.clone());
                                             filename_hash.insert(filename_link_pair.0, filename_link_pair.1);
@@ -215,14 +190,14 @@ fn main() {
                             // Filename does not exist in hash map.
                             None => {
                                 // Clear current rich presence information so not visible while uploading.
-                                /* match discord_client.clear_activity() {
+                                match discord_client.clear_activity() {
                                     Ok(_) => (),
                                     Err(e) => {
                                         error_log::log_error("main: Discord Error on album art update", e.to_string().as_str());
                                     }
-                                } */
+                                }
 
-                                match trpl::run(write_album_art(album_art, config_values.imgur.clone().unwrap())) {
+                                match trpl::run(write_album_art(album_art, &config_values.catbox_user_hash)) {
                                     Ok(filename_link_pair) => {
                                         active_file_image_link = Some(filename_link_pair.1.clone());
                                         filename_hash.insert(filename_link_pair.0, filename_link_pair.1);
@@ -379,16 +354,7 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
                   should be performed. Default is true.
                 - va_album_individual indidcates whether or not tracks with "Various Artists" as the album artist
                   should have their album fields blank and album art processed individually. Default is true.
-                [imgur] contains information used for uploading images to Imgur.
-                - clientId is used for making API calls with the imgurs crate functions.
-                - clientSecret is used in select functions, like refreshing access tokens.
-                - album_id is optionally used for moving uploaded images to a specified album. (only with auth)
-                - refresh_token is used to obtain a new access token when it expires.
-                - access_token is used for authenticating when performing actions as a certain user,
-
-                Since it is optional, the following must be added to the config file to use Imgur functionality:
-                [imgur]
-                clientId = 'xxxxxx'
+                - catbox_user_hash is used to upload images to the image host, catbox.moe.
             */ 
             write!(config_file,"player_name = \'cmus\'\n\
                                 player_check_delay = 5\n\
@@ -400,7 +366,7 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
                 player_check_delay: 5,
                 run_secondary_checks: true,
                 va_album_individual: true,
-                imgur: None,
+                catbox_user_hash: None,
             };
 
             return Ok(config_values);
@@ -460,40 +426,6 @@ fn update_config(new_access_token: String, new_refresh_token: String) -> Result<
                                 .write(true)
                                 .truncate(true)
                                 .open(&config_file_path)?;
-
-            match current_config_values.imgur {
-                Some(current_imgur_info) => {
-                    if current_imgur_info.album_id.is_some() {
-                        let _ = write!(config_file, "player_name = \'{}\'\n\
-                                                     player_check_delay = {}\n\
-                                                     run_secondary_checks = {}\n\
-                                                     va_album_individual = {}\n\n\
-                                                     [imgur]\n\
-                                                     clientId = \'{}\'\n\
-                                                     clientSecret = \'{}\'\n\
-                                                     album_id = \'{}\'\n\
-                                                     access_token = \'{}\'\n\
-                                                     refresh_token = \'{}\'", 
-                            current_config_values.player_name, current_config_values.player_check_delay, current_config_values.run_secondary_checks, current_config_values.va_album_individual,
-                            current_imgur_info.clientId, current_imgur_info.clientSecret, current_imgur_info.album_id.unwrap(), new_access_token, new_refresh_token);
-                    } else {
-                        let _ = write!(config_file, "player_name = \'{}\'\n\
-                                                     player_check_delay = {}\n\
-                                                     run_secondary_checks = {}\n\
-                                                     va_album_individual = {}\n\n\
-                                                     [imgur]\n\
-                                                     clientId = \'{}\'\n\
-                                                     clientSecret = \'{}\'\n\
-                                                     access_token = \'{}\'\n\
-                                                     refresh_token = \'{}\'", 
-                            current_config_values.player_name, current_config_values.player_check_delay, current_config_values.run_secondary_checks, current_config_values.va_album_individual,
-                            current_imgur_info.clientId, current_imgur_info.clientSecret, new_access_token, new_refresh_token);
-                    }
-                },
-                None => {
-                    return Err(Box::from("Imgur information section has been removed from config file during token update."));
-                },
-            }
         }
         Ok(false) => {
             // Configuration file does not exist, create it now and write default values to it.
@@ -626,7 +558,7 @@ fn get_status_by_pid(sys: &System, player_pid: &sysinfo::Pid) -> ProcessStatus {
     }
 }
 
-async fn write_album_art(album_art: AlbumArt, mut imgur_info: ImgurInfo) -> Result<(String, String), Box<dyn std::error::Error>> {
+async fn write_album_art(album_art: AlbumArt, catbox_user_hash: &Option<String>) -> Result<(String, String), Box<dyn std::error::Error>> {
     let mut reader: ImageReader<Cursor<Vec<u8>>>;
     let img: DynamicImage;
     let mime_type = album_art.filename.rsplit_once('.').unwrap().1;
@@ -735,8 +667,7 @@ async fn write_album_art(album_art: AlbumArt, mut imgur_info: ImgurInfo) -> Resu
     result_buf.flush()?;
 
     // Upload file to image host if enough credits are available.
-    let imgur_client = ImgurClient::new(&imgur_info.clientId);
-    let uploaded_link = upload_image(imgur_client, &mut imgur_info, &tempfile_path).await?;
+    let uploaded_link = upload_image(&tempfile_path, catbox_user_hash.clone()).await?;
 
     // Delete file from tmp.
     remove_file(tempfile_path)?;
@@ -745,92 +676,7 @@ async fn write_album_art(album_art: AlbumArt, mut imgur_info: ImgurInfo) -> Resu
     Ok((album_art.filename, uploaded_link))
 }
 
-async fn upload_image(imgur_client: ImgurClient, imgur_info: &mut ImgurInfo, image_path: &String) -> Result<String, Box<dyn std::error::Error>> {
-    let rate_limit = imgur_client.rate_limit().await?;
-    let uploaded: imgurs::ImageInfo;
-
-    if rate_limit.data.client_remaining >= 10 {
-        uploaded = imgur_client.upload_image(&image_path).await?;
-    } else {
-        return Err(Box::from("Imgur clientId does not have enough credits remaining to upload an image."));
-    }
-
-    /* let re_client = reqwest::Client::builder()
-                            .local_address(std::net::IpAddr::from([192, 168, 1, 23]))
-                            .build().unwrap();
-    let mut req = re_client.request(reqwest::Method::POST, format!("https://api.imgur.com/3/album/{}/add", imgur_info.clone().album_id.unwrap()).as_str());
-    req = req
-            .header("Authorization", format!("Bearer {}", &imgur_info.clone().access_token.unwrap()).as_str());
-
-    let hm = HashMap::from([
-        ("ids[]", "cQXDZZw")
-    ]);
-    req = req.form(&hm);
-    let request = req.build()?;
-    let resp = re_client.execute(request).await?;
-
-    println!("status: {}\nheaders: {:?}", resp.status(), resp.headers()); */
-
-    /* // Check if access_token and refresh_token are defined.
-    // If both are defined and accurate, moving into an album is supported.
-    if imgur_info.access_token.clone().is_some() && imgur_info.refresh_token.clone().is_some() {
-        // If album_id is defined, attempt to move new image into album provided.
-        match imgur_info.album_id.clone() {
-            Some(album_id) => {
-                // Check for 10 + 3 credits.
-                if rate_limit.data.client_remaining >= 13 {
-                    // Upload image, record info.
-                    uploaded = imgur_client.upload_image(&image_path).await?;
-                    println!("Upload success");  
-
-                    // Attempt to move uploaded image to album with provided album_id.
-                    let mut api_hash: HashMap<&str, String> = HashMap::from([("ids[]", uploaded.data.id.clone()),]);
-                    let mut http_response = send_api_request(&imgur_client, Method::POST, format!("https://api.imgur.com/3/album/{}/add", album_id), Some(api_hash)).await?;
-                    println!("status: {:?}", http_response.headers());
-                    // If 401 is returned, access_token may have expired.
-                    if http_response.status() == StatusCode::from_u16(401).unwrap() {
-                        println!("401");
-                        // Construct and send API request for new access_token.
-                        api_hash = HashMap::from([
-                            ("refresh_token", imgur_info.refresh_token.clone().unwrap()),
-                            ("clientId", imgur_info.clientId.clone()),
-                            ("clientSecret", imgur_info.clientSecret.clone()),
-                            ("grant_type", "refresh_token".to_owned()),
-                        ]);
-                        http_response = send_api_request(&imgur_client, Method::POST, "https://api.imgur.com/oauth2/token".to_owned(), Some(api_hash)).await?;
-                        let response_body = http_response.text().await?;
-                        let body_json: Value = serde_json::from_str(&response_body)?;
-                        imgur_info.update_tokens(body_json["access_token"].to_string(), body_json["refresh_token"].to_string());
-
-                        // With new access_token, try previous request again.
-                        api_hash = HashMap::from([("ids[]", uploaded.data.id),]);
-                        http_response = send_api_request(&imgur_client, Method::POST, format!("https://api.imgur.com/3/album/{}/add", album_id), Some(api_hash)).await?;
-                        if http_response.status() != StatusCode::from_u16(200).unwrap() {
-                            return Err(Box::from(format!("Imgur API request to add image to album failed after token update with status: {}", http_response.status()).as_str()));
-                        }
-                        println!("Success move");
-                    }
-                } else {
-                    return Err(Box::from("Imgur clientId does not have enough credits remaining to upload an image and move to provided album."));
-                }
-            }
-            // No album_id provided, just upload image.
-            None => {
-                if rate_limit.data.client_remaining >= 10 {
-                    uploaded = imgur_client.upload_image(&image_path).await?;       
-                } else {
-                    return Err(Box::from("Imgur clientId does not have enough credits remaining to upload an image."));
-                }
-            },
-        }
-    } else {
-        // No access_token and refresh_token provided, only upload image.
-        if rate_limit.data.client_remaining >= 10 {
-            uploaded = imgur_client.upload_image(&image_path).await?;       
-        } else {
-            return Err(Box::from("Imgur clientId does not have enough credits remaining to upload an image."));
-        }
-    } */
-
-   Ok(uploaded.data.link)
+async fn upload_image(image_path: &String, catbox_user_hash: Option<String>) -> Result<String, Box<dyn std::error::Error>> {
+    let uploaded = from_file(image_path, catbox_user_hash.as_ref()).await?;
+    Ok(uploaded)
 }
