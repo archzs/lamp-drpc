@@ -84,8 +84,8 @@ fn main() {
             process::exit(1);
         }
     };
+
     let sleep_time: Duration = Duration::from_secs(config_values.player_check_delay);
-    let rest_time: Duration = Duration::from_millis(5);
 
     // Assign MusicPlayer type based on provided player_name
     let mut active_music_player: MusicPlayer;
