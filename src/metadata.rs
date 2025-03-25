@@ -39,7 +39,7 @@ pub fn read_metadata(active_file_path: &String, va_album_individual: &bool) -> O
         "flac" => return read_vorbis(&active_file_path, &va_album_individual),
         "mp3" | "wav" => return read_id3(&active_file_path, &va_album_individual),
         _ => {
-            error_log::log_error("File Error", format!("The file at {} is not in a supported format.", active_file_path).as_str());
+            error_log::log_error("metadata:read_metadata Error", format!("The file at {} is not in a supported format.", active_file_path).as_str());
             return None;
         }
     }
@@ -106,6 +106,7 @@ fn read_vorbis(active_file_path: &String, va_album_individual: &bool) -> Option<
             if artist_vec.len() > 0 {
                 metadata_pack.artist = artist_vec.join(", ");
             } else {
+                error_log::log_error("metadata:read_vorbis Warning", format!("No artist tag(s) were found in file {}.", active_file_path).as_str());
                 return None;
             }
 
@@ -113,6 +114,7 @@ fn read_vorbis(active_file_path: &String, va_album_individual: &bool) -> Option<
             if let Some(title) = title_tag {
                 metadata_pack.title = title;
             } else {
+                error_log::log_error("metadata:read_vorbis Warning", format!("No title tag(s) were found in file {}.", active_file_path).as_str());
                 return None;
             }
 
@@ -137,7 +139,7 @@ fn read_vorbis(active_file_path: &String, va_album_individual: &bool) -> Option<
                                     metadata_pack.album_art = Some(new_image);
                                 },
                                 _a => { // For any other types
-                                    error_log::log_error("Metadata Error", format!("Album cover in file {} is of unsupported mime type {:?}.", &active_file_path, _a).as_str());
+                                    error_log::log_error("metadata:read_vorbis:album_art.mime_type match Error", format!("Album cover in file {} is of unsupported mime type {:?}.", &active_file_path, _a).as_str());
                                     metadata_pack.album_art = None;
                                 }
                             }
@@ -147,7 +149,7 @@ fn read_vorbis(active_file_path: &String, va_album_individual: &bool) -> Option<
                     }
                 }
                 Err(e) => {
-                    error_log::log_error("Metadata Error", format!("Album art could not be extracted from the file at {}:\n{:?}", active_file_path, e).as_str());
+                    error_log::log_error("metadata:read_vorbis:FlacTag::read_from_path() match Error", format!("Album art could not be extracted from the file at {}:\n{:?}", active_file_path, e).as_str());
                     metadata_pack.album_art = None;
                 }
             }
@@ -155,7 +157,7 @@ fn read_vorbis(active_file_path: &String, va_album_individual: &bool) -> Option<
             Some(metadata_pack)
         }
         Err(e) => {
-            error_log::log_error("Metadata Error", format!("Vorbis comments could not be read from the file at {}:\n{:?}", active_file_path, e).as_str());
+            error_log::log_error("metadata:read_vorbis:open_ext() match Error", format!("Vorbis comments could not be read from the file at {}:\n{:?}", active_file_path, e).as_str());
             return None;
         }
     }
@@ -186,7 +188,7 @@ fn read_id3(active_file_path: &String, va_album_individual: &bool) -> Option<Met
             match id3_tag.artists() {
                 Some(artists) => metadata_pack.artist = artists.join(", "),
                 None => {
-                    error_log::log_error("Metadata Error", format!("No artist tag(s) were found in file {}.", active_file_path).as_str());
+                    error_log::log_error("metadata:read_id3:id3_tag.artists() match Warning", format!("No artist tag(s) were found in file {}.", active_file_path).as_str());
                     return None;
                 }
             }
@@ -195,7 +197,7 @@ fn read_id3(active_file_path: &String, va_album_individual: &bool) -> Option<Met
             match id3_tag.title() {
                 Some(title) => metadata_pack.title = title.to_owned(),
                 None => {
-                    error_log::log_error("Metadata Error", format!("No title tag was found in file {}.", active_file_path).as_str());
+                    error_log::log_error("metadata:read_id3:id3_tag.title() match Warning", format!("No artist tag(s) were found in file {}.", active_file_path).as_str());
                     return None;
                 }
             }
@@ -224,7 +226,7 @@ fn read_id3(active_file_path: &String, va_album_individual: &bool) -> Option<Met
             return Some(metadata_pack);
         }
         Err(e) => {
-            error_log::log_error("Metadata Error", format!("ID3 tags could not be read from the file at {}:\n{}", &active_file_path, e).as_str());
+            error_log::log_error("metadata:read_id3:Tag::read_from_path() match Error", format!("ID3 tags could not be read from the file at {}:\n{}", &active_file_path, e).as_str());
             return None;
         }    
     }
