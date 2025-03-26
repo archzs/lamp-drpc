@@ -87,23 +87,26 @@ impl StandardPlayer for Cmus {
                     // If file path cannot be parsed, log error and exit.
                     "status playing" | "status paused" | "status stopped" => {
                         match output_string_lines[1].strip_prefix("file ") {
-                            Some(file_path) => active_file_path = Some(file_path.to_string()),
-                            None => active_file_path = None,
+                            Some(file_path) => {
+                                active_file_path = Some(file_path.to_string());
+                                active_file_duration = output_string_lines[2].strip_prefix("duration ");
+                            },
+                            None => {
+                                active_file_path = None;
+                                active_file_duration = None;
+                            }
                         };
-                        active_file_duration = output_string_lines[2].strip_prefix("duration ");
+                        
                         //active_file_position = output_string_lines[3].strip_prefix("position ");
                     },
                     &_ => return Err(Box::from("cmus has exited.")),
                 }
 
                 // Check str options. If duration and position could not be parsed, set to None. 
-                match active_file_duration.unwrap_or_default().parse::<u64>() {
-                    Ok(duration) => self.active_duration = Some(duration),
-                    Err(e) => {
-                        error_log::log_error("player:Cmus:get_active_file_path Error", e.to_string().as_str());
-                        self.active_duration = None;
-                    }
-                }
+                self.active_duration = match active_file_duration.unwrap_or_default().parse::<u64>() {
+                    Ok(duration) => Some(duration),
+                    Err(_) => None,
+                };
 
                 /* match active_file_position.unwrap_or_default().parse::<u64>() {
                     Ok(position) => self.active_position_duration.0 = Some(position),
