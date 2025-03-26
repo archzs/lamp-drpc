@@ -304,8 +304,6 @@ fn main() {
         player_status = player_process.status();
     }
 
-    println!("Exited");
-
     // Update hash file with all changes on exit.
     if let Err(e) = write_to_hash_file(&filename_hash) {
         error_log::log_error("main:write_to_hash_file Error", e.to_string().as_str());
