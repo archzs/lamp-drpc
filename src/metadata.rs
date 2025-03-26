@@ -53,7 +53,6 @@ fn hash_filename(album_artist: &Option<String>, album: &Option<String>, year: Op
 
     // Hash metadata string and image bytes for first and second halves of filename, then concat image extension.
     let hashed_filename = format!("{}-{}{}", CRC32.checksum(metadata_string.as_bytes()).to_string(), CRC32.checksum(image_data).to_string(), mime_type);
-    println!("{}", hashed_filename);
     return hashed_filename;
 }
 
