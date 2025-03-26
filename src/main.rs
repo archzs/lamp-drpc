@@ -14,7 +14,7 @@ use image::{DynamicImage, ImageEncoder, ImageFormat, ImageReader};
 use std::io::BufWriter;
 use fast_image_resize::images::Image;
 use fast_image_resize::{IntoImageView, Resizer, ResizeOptions};
-use http::{request, Method, StatusCode};
+use reqwest::header::USER_AGENT;
 use std::time::{SystemTime, UNIX_EPOCH};
 use catbox::file::from_file;
 
@@ -155,17 +155,19 @@ fn main() {
                             // Filename exists in hash map.
                             Some(image_link) => {
                                 // Link corresponding to filename is good, assign it to variable.
-                                /* let link_status_good = match trpl::run(get_link_status(&http_client, image_link)) {
+                                let link_status_good = match trpl::run(get_link_status(&http_client, image_link)) {
                                     Ok(link_status) => link_status,
                                     Err(e) => {
                                         error_log::log_error("main: link_status_good Error", e.to_string().as_str());
                                         false
                                     }
-                                }; */
+                                };
                                 
-                                if true {
+                                if link_status_good {
+                                    println!("link good");
                                     active_file_image_link = Some(image_link.clone());
                                 } else { // Link is bad, upload again and update in hash map.
+                                    println!("link bad");
                                     // Clear current rich presence information so not visible while uploading.
                                     match discord_client.clear_activity() {
                                         Ok(_) => (),
@@ -377,86 +379,12 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     }
 }
 
-fn update_config(new_access_token: String, new_refresh_token: String) -> Result<(), Box<dyn std::error::Error>> {
-    // Check if config directory exists at $HOME/.config/lamp-drpc, create it if it does not.
-    let config_dir_path;
-    match env::home_dir() {
-        Some(path) => {
-            config_dir_path = path.to_str().unwrap().to_owned() + "/.config/lamp-drpc";
-        },
-        None => {
-            eprintln!("Error: Could not find home directory.");
-            process::exit(1);
-        },
-    }
-    match fs::exists(&config_dir_path) {
-        Ok(true) if Path::new(&config_dir_path.as_str()).is_dir() => {},
-        Ok(true) => { 
-            // File exists at configuration directory path, but is not a directory.
-            eprintln!("Error: file at {} is not a directory.", config_dir_path);
-            process::exit(1);
-        },
-        Ok(false) => {
-            // Configuration directory does not exist, create it now.
-            match fs::create_dir_all(&config_dir_path) {
-                Ok(_) => {},
-                Err(e) =>  {
-                    eprintln!("Error: {}", e);
-                    process::exit(1);
-                },
-            }
-        },
-        Err(e) => { 
-            eprintln!("Error: {}", e); 
-            process::exit(1); 
-        },
-    }
-    
-    // Check for configuration file. If it exists, read it, otherwise, create with default values.
-    let config_file_path = config_dir_path + "/lamp.toml";
-    match fs::exists(&config_file_path) {
-        Ok(true) => {
-            // File already exists, first read values from it.
-            let toml_string = fs::read_to_string(&config_file_path)?;
-            let current_config_values: Config = toml::from_str(toml_string.as_str())?;
-
-            // Open config file and overwrite contents, using new tokens.
-            let mut config_file = fs::OpenOptions::new()
-                                .read(false)
-                                .write(true)
-                                .truncate(true)
-                                .open(&config_file_path)?;
-        }
-        Ok(false) => {
-            // Configuration file does not exist, create it now and write default values to it.
-            let mut config_file = fs::OpenOptions::new()
-                                .read(false)
-                                .write(true)
-                                .create(true)
-                                .open(config_file_path)?;
-            
-            let _ = write!(config_file, "player_name = \'cmus\'\n\
-                                         player_check_delay = 5\n\
-                                         run_secondary_checks = true\n\
-                                         va_album_individual = true\n");
-
-            return Err(Box::from("Config file confirmed to not exist during token update. Default configuration created, Imgur information must be added manually."));
-        }
-        Err(e) => { 
-            error_log::log_error("Config Error", &e.to_string().as_str());
-            process::exit(1); 
-        },
-    }
-
-    Ok(())
-}
-
 async fn get_link_status(http_client: &reqwest::Client, image_link: &String) -> Result<bool, Box<dyn std::error::Error>> {
     let response = http_client
         .head(image_link)
+        .header(USER_AGENT, env!("CARGO_PKG_VERSION"))
         .send()
         .await?;
-
     if response.status() == reqwest::StatusCode::OK { Ok(true) } else { Ok(false) }
 }
 
@@ -505,21 +433,19 @@ fn load_hash_file() -> Result<HashMap<String, String>, Box<dyn std::error::Error
 
 fn write_to_hash_file(filename_hash: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     // Check for hashed link file. If it exists, read it, otherwise create blank one.
-    let config_dir_path: String; 
-    match env::home_dir() {
-        Some(path) => {
-            config_dir_path = path.to_str().unwrap().to_owned() + "/.config/lamp-drpc";
-        },
+    let config_dir_path: String = match env::home_dir() {
+        Some(path) => path.to_str().unwrap().to_owned() + "/.config/lamp-drpc",
         None => {
-            eprintln!("Error: Could not find home directory.");
+            eprintln!("main:load_config:home_dir Error: Could not find home directory.");
             process::exit(1);
-        },
-    }
+        }
+    };
 
-    let hash_file_path = config_dir_path + "/link_hash.json";
+    let hash_file_path = config_dir_path + "/albumart_hash.json";
     match fs::exists(&hash_file_path) {
-        Ok(true) | Ok(false) => {
-            // Write to hash file. If it does not exist, create it again and write to it.
+        Ok(_) => {
+            // If hash file exists, overwrite contents with current hash map.
+            // If it does not exist, create it again and write to it.
             let mut hash_file = fs::OpenOptions::new()
                                         .read(false)
                                         .write(true)
@@ -541,9 +467,8 @@ fn write_to_hash_file(filename_hash: &HashMap<String, String>) -> Result<(), Box
 fn get_pid_by_proc_name(sys: &System, proc_name: &String) -> sysinfo::Pid {
     if let Some(possible_process) = sys.processes_by_exact_name(proc_name.as_ref()).next() {
         return possible_process.pid();
-    }
-    else {
-        error_log::log_error("Error", format!("The PID of target player {} could not be determined. The player may not be running or may have a different process name than provided in the configuration file.", proc_name).as_str());
+    } else {
+        error_log::log_error("main:get_pid_by_proc_name Error", format!("The PID of target player {} could not be determined. The player may not be running or may have a different process name than provided in the configuration file.", proc_name).as_str());
         process::exit(1);
     }
 }
@@ -551,17 +476,24 @@ fn get_pid_by_proc_name(sys: &System, proc_name: &String) -> sysinfo::Pid {
 fn get_status_by_pid(sys: &System, player_pid: &sysinfo::Pid) -> ProcessStatus {
     if let Some(player_process) = sys.process(*player_pid) {
         return player_process.status();
-    }
-    else {
-        error_log::log_error("Error", "The target PID could not be found. The player may no longer be running.");
+    } else {
+        error_log::log_error("main:get_status_by_pid Error", "The target PID could not be found. The player may no longer be running.");
         process::exit(1);
     }
 }
 
 async fn write_album_art(album_art: AlbumArt, catbox_user_hash: &Option<String>) -> Result<(String, String), Box<dyn std::error::Error>> {
+    // Determine format of image to write.
     let mut reader: ImageReader<Cursor<Vec<u8>>>;
-    let img: DynamicImage;
-    let mime_type = album_art.filename.rsplit_once('.').unwrap().1;
+    let (hash_filename, mime_type): (&str, &str);
+
+    if let Some(split_filename) = album_art.filename.rsplit_once('.') {
+        hash_filename = split_filename.0;
+        mime_type = split_filename.1;
+    } else {
+        return Err(Box::from("Splitting filename failed, mime type of embedded image could not be determined."));
+    }
+
     match mime_type {
         "jpg" | "jpeg" => {
             reader = ImageReader::new(Cursor::new(album_art.data));
@@ -571,20 +503,19 @@ async fn write_album_art(album_art: AlbumArt, catbox_user_hash: &Option<String>)
             reader = ImageReader::new(Cursor::new(album_art.data));
             reader.set_format(ImageFormat::Png);
         }
-        &_ => {
-            reader = ImageReader::new(Cursor::new(album_art.data)).with_guessed_format()?;
-        }
+        &_ => return Err(Box::from(format!("Mime type {} is not supported.", mime_type).as_str())),
     } 
 
     // Decode image and get dimensions.
-    img = reader.decode()?;
+    let img = reader.decode()?;
     let dimensions = (img.width(), img.height());
 
     // Determine new image dimensions based on current dimensions. 
-    // If the image is already a square between 512x512 and 1024x1024, no resizing or cropping is necessary.
+    // If the image is already a square between 512x512 and 1024x1024, no cropping is necessary.
     let (dst_width, dst_height): (u32, u32);
     let mut dst_image: Image<'_>;
-    // Check if image is already square (equal dimensions).
+
+    // Image is already square (equal dimensions).
     if dimensions.0 == dimensions.1 {
         if dimensions.0 < 512 {
             (dst_width, dst_height) = (512, 512);
@@ -595,19 +526,16 @@ async fn write_album_art(album_art: AlbumArt, catbox_user_hash: &Option<String>)
         }
 
         match img.pixel_type() {
-            Some(pt) => {
-                dst_image = Image::new(dst_width, dst_height, pt);
-            }
-            None => {
-                return Err(Box::from("Pixel type of image could not be determined."));
-            }
+            Some(pt) => dst_image = Image::new(dst_width, dst_height, pt),
+            None => return Err(Box::from("Pixel type of image could not be determined.")),
         }
 
         // Resize image with no cropping.
         Resizer::new().resize(&img, &mut dst_image, None)?;
     } else {
+        // Image is not already square.
+        // Determine which dimension is smaller.
         let smaller_dimension: u32;
-        // Determine which dimension is larger.
         if dimensions.0 > dimensions.1 {
             smaller_dimension = dimensions.1;
         } else {
@@ -631,23 +559,20 @@ async fn write_album_art(album_art: AlbumArt, catbox_user_hash: &Option<String>)
         }
 
         match img.pixel_type() {
-            Some(pt) => {
-                dst_image = Image::new(dst_width, dst_height, pt);
-            }
-            None => {
-                return Err(Box::from("Pixel type of image could not be determined."));
-            }
+            Some(pt) => dst_image = Image::new(dst_width, dst_height, pt),
+            None => return Err(Box::from("Pixel type of image could not be determined.")),
         }
 
         // Resize image with cropping.
         Resizer::new().resize(&img, &mut dst_image, &ResizeOptions::new().fit_into_destination(Some((0.5,0.5))),)?;
     }
 
-    let tempfile_path = format!("{}/{}.{}", env::temp_dir().to_string_lossy(), album_art.filename.rsplit_once('.').unwrap().0, mime_type);
+    // Create file at temporary directory.
+    let tempfile_path = format!("{}/{}.{}", env::temp_dir().to_string_lossy(), hash_filename, mime_type);
     let tempfile = File::create(&tempfile_path)?;
     let mut result_buf = BufWriter::new(tempfile);
 
-    // Decide on image encoder to use based on mime type.
+    // Decide on image encoder to use based on mime type and write image to temp file.
     match mime_type {
         "jpg" | "jpeg" => JpegEncoder::new(&mut result_buf)
             .write_image(
@@ -661,15 +586,16 @@ async fn write_album_art(album_art: AlbumArt, catbox_user_hash: &Option<String>)
                 dst_width,
                 dst_height,
     img.color().into(),)?,
-        _ => return Err(Box::from("Pixel type of image could not be determined.")),
+        _ => return Err(Box::from(format!("Mime type {} is not supported.", mime_type).as_str())),
     }
     
+    // Ensure all image data is written to temp file before proceeding.
     result_buf.flush()?;
 
-    // Upload file to image host if enough credits are available.
+    // Upload file to image host.
     let uploaded_link = upload_image(&tempfile_path, catbox_user_hash.clone()).await?;
 
-    // Delete file from tmp.
+    // Delete file from temp directory.
     remove_file(tempfile_path)?;
 
     println!("album filename: {}\nimgur link: {}", album_art.filename, uploaded_link);
