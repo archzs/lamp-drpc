@@ -421,7 +421,7 @@ fn load_hash_file() -> Result<HashMap<String, String>, Box<dyn std::error::Error
         },
     }
 
-    let hash_file_path = config_dir_path + "/link_hash.json";
+    let hash_file_path = config_dir_path + "/albumart_hash.json";
     let mut filename_hash = HashMap::<String, String>::new();
 
     match fs::exists(&hash_file_path) {
