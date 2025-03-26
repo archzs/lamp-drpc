@@ -3,8 +3,8 @@ use std::env;
 use std::fs::{remove_file, File};
 use std::io::{BufReader, BufWriter, Cursor};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use catbox::file::from_file;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use catbox::file::{self, from_file};
 use discord_presence::models::{ActivityTimestamps, ActivityType};
 use fast_image_resize::images::Image;
 use fast_image_resize::{IntoImageView, Resizer, ResizeOptions};
@@ -119,6 +119,8 @@ fn main() {
     let mut previous_file_path = String::new(); // The path of the previous track, used to determine when the active track has changed.
     let mut active_file_image_link = Some(String::new()); // Link to the album art of the currently playing track, hosted on Imgur.
     let mut active_duration: Option<u64> = None; // The duration of audio file.
+    let mut previous_update_time = Instant::now(); // The time of the previous file update.
+    let mut previous_duration: Option<u64> = None; // The duration of the previous track.
     let mut new_metadata_package = Some(MetadataPackage::default());
     let http_client = reqwest::Client::new();
     let mut discord_client = discord_presence::Client::new(1353193853393571910);
@@ -134,16 +136,26 @@ fn main() {
                 active_file_path = file_path;
                 active_duration = active_music_player.get_duration();
 
-                // Only update metadata if file has changed.
-                if active_file_path != previous_file_path {
+                // Only update metadata if file has changed or playback has completed.
+                let playback_complete = match previous_duration {
+                    Some(seconds) => {
+                        if Instant::now().duration_since(previous_update_time) >= Duration::from_secs(seconds) { true }
+                        else { false }
+                    },
+                    None => false,
+                };
+                
+                if active_file_path != previous_file_path || playback_complete {
                     // Record time of file change.
                     let (start_time, end_time): (Option<u64>, Option<u64>);
+                    previous_update_time = Instant::now();
                     match SystemTime::now().duration_since(UNIX_EPOCH) {
                         Ok(time) => {
                             start_time = Some(time.as_secs());
 
                             if let Some(duration) = active_duration {
                                 end_time = Some(time.as_secs() + duration);
+                                previous_duration = Some(duration);
                             } else {
                                 end_time = None;
                             }
