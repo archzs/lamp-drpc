@@ -4,7 +4,7 @@ use std::fs::{remove_file, File};
 use std::io::{BufReader, BufWriter, Cursor};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use catbox::file::{self, from_file};
+use catbox::file::from_file;
 use discord_presence::models::{ActivityTimestamps, ActivityType};
 use fast_image_resize::images::Image;
 use fast_image_resize::{IntoImageView, Resizer, ResizeOptions};
@@ -30,26 +30,41 @@ use metadata::AlbumArt;
 use metadata::MetadataPackage;
 use metadata::read_metadata;
 
+/*
+ *  [PLAYER IMPLEMENTATION HERE]
+ *  Definition of MusicPlayer enum. These variants include the defined music players and
+ *  must be established to assign player-specific functions in the impl block below.
+ */
 enum MusicPlayer {
     Cmus(player::Cmus),
+//  NewPlayer(player::NewPlayer)  
 }
 
+/*
+ *  [PLAYER IMPLEMENTATION HERE]
+ *  This impl block will provide new MusicPlayers with the correct functions depending on
+ *  which variant is assigned. Function arguments and mutability of arguments depend on
+ *  implementation in player.rs.
+ */
 impl StandardPlayer for MusicPlayer {
     fn verify_running(&self) -> bool {
         match self {
             MusicPlayer::Cmus(cmus) => return Cmus::verify_running(&cmus),
+//          MusicPlayer::NewPlayer(newplayer_instance) => return NewPlayer::verify_running(newplayer_instance),
         }
     }
 
     fn get_active_file_path(&mut self) -> Result<Option<String>, Box<dyn std::error::Error>> {
         match self {
             MusicPlayer::Cmus(cmus) => return Cmus::get_active_file_path(cmus),
+//          MusicPlayer::NewPlayer(newplayer_instance) => return NewPlayer::get_active_file_path(newplayer_instance),
         }
     }
 
     fn get_duration(&self) -> Option<u64> {
         match self {
             MusicPlayer::Cmus(cmus) => return Cmus::get_duration(&cmus),
+//          MusicPlayer::NewPlayer(newplayer_instance) => return NewPlayer::get_duration(newplayer_instance),
         }
     }
 }
@@ -85,9 +100,16 @@ fn main() {
     let sleep_time: Duration = Duration::from_secs(config_values.player_check_delay);
 
     // Assign MusicPlayer type based on provided player_name
+    /*
+     *  [PLAYER IMPLEMENTATION HERE]
+     *  This is where the player is selected and the matching MusicPlayer implementation is assigned. 
+     *  The value of player_name read from the config file should match the player's process name, 
+     *  as it will be used to find the PID and keep tabs on its status.
+     */
     let mut active_music_player: MusicPlayer;
     match config_values.player_name.as_str() {
         "cmus" => active_music_player = MusicPlayer::Cmus(Cmus::default()),
+//      "player_process_name" => active_music_player = MusicPlayer::NewPlayer(NewPlayer::default()),
         _ => {
             error_log::log_error("main: active_music_player match Error", format!("The player_name \"{}\" provided in the lamp.toml configuration file is unsupported.", config_values.player_name).as_str());
             process::exit(1); 
@@ -386,7 +408,7 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
                   Default is 5.
                 - run_secondary_checks determines whether or not player-specific secondary verification of status
                   should be performed. Default is true.
-                - va_album_individual indidcates whether or not tracks with "Various Artists" as the album artist
+                - va_album_individual indidcates whether or not tracks with "Various Artists" as the album artist and album name
                   should have their album fields blank and album art processed individually. Default is true.
                 - catbox_user_hash is used to upload images to the image host, catbox.moe.
             */ 

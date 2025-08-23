@@ -4,13 +4,23 @@ use crate::error_log;
 use crate::error_log::fs;
 use crate::error_log::process;
 
-// StandardPlayer includes definitions for standard functionality, including filename retrieval and secondary status verification.
+/* 
+ *  StandardPlayer includes definitions for standard functionality, including filename retrieval and secondary status verification.
+ * 
+ *  - Only get_active_file_path is required to have an actual implementation for minimum functionality (Showing metadata for a current track on Discord).
+ * 
+ *  - verify_running is only used as a secondary check in addition to referencing a player's PID, to be really sure that the player is running properly.
+ *    If no such secondary check is desired, this function should simply return true.
+ *  
+ *  - Implementing get_duration will enable the display of a progress bar on Discord's rich presence in addition to the metadata.
+ */
 pub trait StandardPlayer {
     fn verify_running(&self) -> bool;
     fn get_active_file_path(&mut self) -> Result<Option<String>, Box<dyn std::error::Error>>;
     fn get_duration(&self) -> Option<u64>;
 }
 
+/************************** Function Implementations for cmus **************************/
 pub struct Cmus {
     pub cmus_remote_output: Option<String>,
     active_duration: Option<u64>,
@@ -126,3 +136,44 @@ impl StandardPlayer for Cmus {
         self.active_duration
     }
 }
+/************************** END Function Implementations for cmus **************************/
+
+/************************** Function Implementations Template **************************/
+/*
+
+[PLAYER IMPLEMENTATION HERE]
+
+// If a player struct will require data values for use in its functions, they should be included here
+// and in the Default trait implementation.
+
+pub struct NewPlayer {
+    active_duration: Option<u64>,
+}
+
+impl Default for NewPlayer {
+    fn default() -> Self {
+        NewPlayer {
+            active_duration: None,
+        }
+    }
+}
+
+impl StandardPlayer for NewPlayer {
+    fn verify_running(&self) -> bool {
+        return true;
+    }
+
+    // If None is returned, nothing will be shown on Discord, but the program will continue running.
+    // Error logging is handled in main.rs when this function is called, so an error returned here will be logged.
+    fn get_active_file_path(&mut self) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        Ok(None)
+    }
+
+    // active_duration does not need to be stored in the struct.
+    fn get_duration(&self) -> Option<u64> {
+        self.active_duration
+    }
+} 
+
+*/
+/************************** END Function Implementations Template **************************/
