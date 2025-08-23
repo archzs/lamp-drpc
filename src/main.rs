@@ -404,18 +404,19 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
             /* 
                 Set default configuration values.
                 - player_name is the name of the process to be tracked while running. Default is 'cmus'.
-                - player_check_delay becomes the amount of time to sleep before checking for the player running.
+                - player_check_delay becomes the amount of time in seconds to sleep before checking for 
+                  the player running when the program starts to allow music player to initialize.
                   Default is 5.
                 - run_secondary_checks determines whether or not player-specific secondary verification of status
                   should be performed. Default is true.
                 - va_album_individual indidcates whether or not tracks with "Various Artists" as the album artist and album name
-                  should have their album fields blank and album art processed individually. Default is true.
-                - catbox_user_hash is used to upload images to the image host, catbox.moe.
+                  should have their album fields blank and album art processed individually. Default is false.
+                - catbox_user_hash is used to upload images to the image host, catbox.moe. It is optional for minimum functionality.
             */ 
             write!(config_file,"player_name = \'cmus\'\n\
                                 player_check_delay = 5\n\
                                 run_secondary_checks = true\n\
-                                va_album_individual = true\n")?;
+                                va_album_individual = false\n")?;
 
             let config_values = Config {
                 player_name: String::from("cmus"),
