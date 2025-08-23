@@ -1,6 +1,6 @@
 # lamp-drpc<br> Local Audio/Music Player - Discord Rich Presence
 
-Lamp is a tool for providing Discord's rich presence with information from local audio players, such as cmus. It is designed to be somewhat easily extended to support any local music player possessing functionality allowing identification of the currently playing file.
+Lamp is a tool for UNIX-based systems providing Discord's rich presence with information from local audio players, such as cmus. It is designed to be somewhat easily extended to support any local music player possessing functionality allowing identification of the currently playing file.
 
 ## Features
 - Reads and displays album, artist, and title (plus albumartist and year) from files in ID3 and Vorbis Comment tag formats.
@@ -12,7 +12,7 @@ Lamp is a tool for providing Discord's rich presence with information from local
 
 ## Configuration
 
-A default configuration file is created upon starting Lamp, if one does not already exist. <br>
+A default configuration file is created under ~/.config/lamp-drpc upon starting Lamp, if one does not already exist. <br>
 
 <code>player_name</code>: Name of the intended music player's process. Used to find the player's PID at startup. <br>
 <code>player_check_delay</code>: Number of seconds to wait before finding player PID. Intended to allow time for music player to initialize. <br>
