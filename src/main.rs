@@ -5,7 +5,8 @@ use std::io::{BufReader, BufWriter, Cursor};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use catbox::file::from_file;
-use discord_presence::models::{ActivityTimestamps, ActivityType};
+use discord_presence::Client;
+use discord_presence::models::rich_presence::{ActivityTimestamps, ActivityType, DisplayType};
 use fast_image_resize::images::Image;
 use fast_image_resize::{IntoImageView, Resizer, ResizeOptions};
 use image::codecs::jpeg::JpegEncoder;
@@ -146,8 +147,10 @@ fn main() {
     let mut new_metadata_package = Some(MetadataPackage::default());
     let http_client = reqwest::Client::new();
     let mut discord_client = discord_presence::Client::new(1353193853393571910);
-    discord_client.start();
+
     thread::sleep(sleep_time);
+
+    discord_client.start();
 
     // Begin main loop
     while player_status != ProcessStatus::Stop {
@@ -211,7 +214,7 @@ fn main() {
                                                 false
                                             }
                                         };
-                                        
+
                                         // If link is good, set active file image link.
                                         if link_status_good {
                                             active_file_image_link = Some(image_link.clone());
@@ -266,12 +269,13 @@ fn main() {
 
                         if album_name_defined && image_link_defined {
                             // Both the album and image link are defined. Apply both to Activity.
-                            match discord_client.set_activity(|a| a._type(ActivityType::Listening)
+                            match discord_client.set_activity(|a| {a.activity_type(ActivityType::Listening)
+                                                                            .status_display(DisplayType::State)
                                                                             .state(&metadata_pack.artist)
                                                                             .details(&metadata_pack.title)
                                                                             .timestamps(|_t| ActivityTimestamps { start: start_time, end: end_time })
                                                                             .assets(|a| {a.large_image(&active_file_image_link.clone().unwrap())
-                                                                            .large_text(metadata_pack.album.unwrap())}) ) {
+                                                                            .large_text(metadata_pack.album.unwrap())}) }) {
                                 Ok(_) => (),
                                 Err(e) => {
                                     error_log::log_error("main: Discord Error on set_activity", e.to_string().as_str());
@@ -279,7 +283,8 @@ fn main() {
                             }
                         } else if album_name_defined && !image_link_defined {
                             // Album is defined, but image link is None. Use default album image, but still apply album name.
-                            match discord_client.set_activity(|a| a._type(ActivityType::Listening)
+                            match discord_client.set_activity(|a| a.activity_type(ActivityType::Listening)
+                                                                            .status_display(DisplayType::State)
                                                                             .state(&metadata_pack.artist)
                                                                             .details(&metadata_pack.title)
                                                                             .timestamps(|_t| ActivityTimestamps { start: start_time, end: end_time })
@@ -292,7 +297,8 @@ fn main() {
                             }
                         } else if !album_name_defined && image_link_defined {
                             // Image link is defined, but album name is None. Apply provided image link, but no album name.
-                            match discord_client.set_activity(|a| a._type(ActivityType::Listening)
+                            match discord_client.set_activity(|a| a.activity_type(ActivityType::Listening)
+                                                                            .status_display(DisplayType::State)
                                                                             .state(&metadata_pack.artist)
                                                                             .details(&metadata_pack.title)
                                                                             .timestamps(|_t| ActivityTimestamps { start: start_time, end: end_time })
@@ -304,7 +310,8 @@ fn main() {
                             }
                         } else {
                             // Both album and image link are None. Use defauly album image, do not provide album name.
-                            match discord_client.set_activity(|a| a._type(ActivityType::Listening)
+                            match discord_client.set_activity(|a| a.activity_type(ActivityType::Listening)
+                                                                            .status_display(DisplayType::State)
                                                                             .state(&metadata_pack.artist)
                                                                             .details(&metadata_pack.title)
                                                                             .timestamps(|_t| ActivityTimestamps { start: start_time, end: end_time })
