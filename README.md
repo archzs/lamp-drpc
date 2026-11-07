@@ -19,5 +19,6 @@ A default configuration file is created under ~/.config/lamp-drpc upon starting 
 <code>run_secondary_checks</code>: Enables/Disables secondary assurance(s) that player is still running (beyond checking for the PID). <br>
 <code>va_album_individual</code>: Enables/Disables display of album name on rich presence if both album and albumartist fields are "Various Artists". <br>
 <code>catbox_user_hash</code>: User hash used for uploaded images to catbox.moe. As this is optional and requires user input, it is not included in the default configuration file and must be manually added. <br>
+<code>mpd_music_dir</code>: Absolute path to same directory specified as the music_directory in mpd configuration. Used for mpd-based players like rmpc that do not provide full path via built-in query. <br>
 
 Code to support any other music players with the ability to identify actively playing tracks should be added as exemplified at the locations indicated with "[PLAYER IMPLEMENTATION HERE]".
