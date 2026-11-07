@@ -23,6 +23,7 @@ use error_log::process;
 
 mod player;
 use player::Cmus;
+use player::Rmpc;
 use player::StandardPlayer;
 use player::Path;
 
@@ -38,6 +39,7 @@ use metadata::read_metadata;
  */
 enum MusicPlayer {
     Cmus(player::Cmus),
+    Rmpc(player::Rmpc),
 //  NewPlayer(player::NewPlayer)  
 }
 
@@ -51,6 +53,7 @@ impl StandardPlayer for MusicPlayer {
     fn verify_running(&self) -> bool {
         match self {
             MusicPlayer::Cmus(cmus) => return Cmus::verify_running(&cmus),
+            MusicPlayer::Rmpc(rmpc) => return Rmpc::verify_running(&rmpc),
 //          MusicPlayer::NewPlayer(newplayer_instance) => return NewPlayer::verify_running(newplayer_instance),
         }
     }
@@ -58,6 +61,7 @@ impl StandardPlayer for MusicPlayer {
     fn get_active_file_path(&mut self) -> Result<Option<String>, Box<dyn std::error::Error>> {
         match self {
             MusicPlayer::Cmus(cmus) => return Cmus::get_active_file_path(cmus),
+            MusicPlayer::Rmpc(rmpc) => return Rmpc::get_active_file_path(rmpc),
 //          MusicPlayer::NewPlayer(newplayer_instance) => return NewPlayer::get_active_file_path(newplayer_instance),
         }
     }
@@ -65,6 +69,7 @@ impl StandardPlayer for MusicPlayer {
     fn get_duration(&self) -> Option<u64> {
         match self {
             MusicPlayer::Cmus(cmus) => return Cmus::get_duration(&cmus),
+            MusicPlayer::Rmpc(rmpc) => return Rmpc::get_duration(&rmpc),
 //          MusicPlayer::NewPlayer(newplayer_instance) => return NewPlayer::get_duration(newplayer_instance),
         }
     }
@@ -77,6 +82,7 @@ struct Config {
     run_secondary_checks: bool,
     va_album_individual: bool,
     catbox_user_hash: Option<String>,
+    mpd_music_dir: Option<String>,
 }
 
 fn main() {
@@ -110,6 +116,7 @@ fn main() {
     let mut active_music_player: MusicPlayer;
     match config_values.player_name.as_str() {
         "cmus" => active_music_player = MusicPlayer::Cmus(Cmus::default()),
+        "rmpc" => active_music_player = MusicPlayer::Rmpc( Rmpc { mpd_music_dir: config_values.mpd_music_dir.clone(), ..Rmpc::default() }),
 //      "player_process_name" => active_music_player = MusicPlayer::NewPlayer(NewPlayer::default()),
         _ => {
             error_log::log_error("main: active_music_player match Error", format!("The player_name \"{}\" provided in the lamp.toml configuration file is unsupported.", config_values.player_name).as_str());
@@ -419,6 +426,7 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
                 - va_album_individual indidcates whether or not tracks with "Various Artists" as the album artist and album name
                   should have their album fields blank and album art processed individually. Default is false.
                 - catbox_user_hash is used to upload images to the image host, catbox.moe. It is optional for minimum functionality.
+                - mpd_music_dir is an absolute path to the MPD library to be used in conjunction with MPD-based player queries
             */ 
             write!(config_file,"player_name = \'cmus\'\n\
                                 player_check_delay = 5\n\
@@ -431,6 +439,7 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
                 run_secondary_checks: true,
                 va_album_individual: true,
                 catbox_user_hash: None,
+                mpd_music_dir: None,
             };
 
             return Ok(config_values);

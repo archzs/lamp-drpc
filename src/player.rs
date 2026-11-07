@@ -3,6 +3,8 @@ pub use std::path::Path;
 use crate::error_log;
 use crate::error_log::fs;
 use crate::error_log::process;
+use serde_json::Value;
+use serde_json::from_str;
 
 /* 
  *  StandardPlayer includes definitions for standard functionality, including filename retrieval and secondary status verification.
@@ -137,6 +139,126 @@ impl StandardPlayer for Cmus {
     }
 }
 /************************** END Function Implementations for cmus **************************/
+
+/************************** Function Implementations for rmpc **************************/
+
+pub struct Rmpc {
+    pub rmpc_song_output: Option<String>,
+    pub active_duration: Option<u64>,
+    pub mpd_music_dir: Option<String>,
+}
+
+impl Default for Rmpc {
+    fn default() -> Self {
+        Rmpc {
+            rmpc_song_output: Some(String::new()),
+            active_duration: None,
+            mpd_music_dir: None,
+        }
+    }
+}
+
+impl Rmpc {
+    fn update_rmpc_song_output() -> Option<String> {
+        // Get info about current track from cmus-remote.
+        let rmpc_song_output = process::Command::new("rmpc")
+                                                    .arg("song")
+                                                    .output();
+        
+        // If output returns an error, log and exit. Otherwise, attempt to process string.
+        match rmpc_song_output {
+            Ok(output) => {
+                match String::from_utf8(output.stdout) {
+                    Ok(ok_string) => Some(ok_string),
+                    Err(e) => {
+                        error_log::log_error("UTF-8 Error", e.to_string().as_str());
+                        return None;
+                    }
+                }
+            }
+            Err(e) => {
+                error_log::log_error("player:Rmpc:update_rmpc_song_output Error", e.to_string().as_str());
+                process::exit(1);
+            }
+        }
+    }
+}
+
+impl StandardPlayer for Rmpc {
+    fn verify_running(&self) -> bool {
+        // Use rmpc remote to query active tab
+        let rmpc_remote_output = process::Command::new("rmpc")
+                                                    .arg("remote")
+                                                    .arg("query")
+                                                    .arg("activetab")
+                                                    .output();
+        
+        // If output returns a message with an active tab specified in JSON format, return true.
+        match rmpc_remote_output {
+            Ok(output) => {
+                match String::from_utf8(output.stdout) {
+                    Ok(ok_string) => {
+                        return ok_string.starts_with("{\"activetab\":"); 
+                    },
+                    Err(e) => {
+                        error_log::log_error("UTF-8 Error", e.to_string().as_str());
+                        return false;
+                    }
+                }
+            }
+            Err(e) => {
+                error_log::log_error("player:Rmpc:verify_running Error", e.to_string().as_str());
+                process::exit(1);
+            }
+        }
+    }
+
+    // If None is returned, nothing will be shown on Discord, but the program will continue running.
+    // Error logging is handled in main.rs when this function is called, so an error returned here will be logged.
+    fn get_active_file_path(&mut self) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        // Update output from rmpc song, along with duration.
+        // This update will always occur before duration is requested in the main loop, so those values will always be up to date.
+        self.rmpc_song_output = Rmpc::update_rmpc_song_output();
+        match &self.rmpc_song_output  {
+            Some(rmpc_song_output) => {
+                let output_string: Value = serde_json::from_str(rmpc_song_output)?;
+
+                let active_file_path: Option<String> = if self.mpd_music_dir.is_some() {
+                    Some(format!("{}{}", self.mpd_music_dir.clone().unwrap(), output_string["file"].as_str().unwrap()))
+                } else {
+                    None
+                };
+
+                //let active_file_path: Option<String> = Some(format!("{}{}", self.mpd_music_dir, output_string["file"]));
+                let active_file_duration: Option<&str> = output_string["duration"]["secs"].as_str();
+
+                // Check str options. If duration could not be parsed, set to None. 
+                self.active_duration = match active_file_duration.unwrap_or_default().parse::<u64>() {
+                    Ok(duration) => Some(duration),
+                    Err(_) => None,
+                };
+
+                /* match active_file_position.unwrap_or_default().parse::<u64>() {
+                    Ok(position) => self.active_position_duration.0 = Some(position),
+                    Err(e) => {
+                        error_log::log_error("player:Cmus:get_active_file_path Error", e.to_string().as_str());
+                        self.active_position_duration.0 = None;
+                    }
+                } */
+
+                Ok(active_file_path)
+            }
+            None => Ok(None)
+        }
+    }
+
+    // active_duration does not need to be stored in the struct.
+    fn get_duration(&self) -> Option<u64> {
+        self.active_duration
+    }
+} 
+
+/************************** END Function Implementations for rmpc **************************/
 
 /************************** Function Implementations Template **************************/
 /*
