@@ -161,6 +161,9 @@ fn main() {
 
     // Begin main loop
     while player_status != ProcessStatus::Stop {
+        // Sleep to avoid checking as fast as possible
+        thread::sleep(Duration::from_millis(250));
+        
         match active_music_player.get_active_file_path() {
             // Active filename is defined
             Ok(Some(file_path)) => {
